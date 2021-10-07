@@ -28,6 +28,11 @@ static void init_uart(void) {
   base_uart_stdout(&uart0);
 }
 
+void __abi_shutdown$(void) {
+    LOG_ERROR("mitigation activated shutdown");
+    while(1) {}
+}
+
 int main(int argc, char **argv) {
   test_status_set(kTestStatusInTest);
 
@@ -37,6 +42,9 @@ int main(int argc, char **argv) {
   }
 
   // Run the SW test which is fully contained within `test_main()`.
+  static unsigned long shadow_stack[256];
+  register unsigned long *shadow_stack_ptr asm("x18") = &shadow_stack[0];
+  asm volatile("" :: "r"(shadow_stack_ptr));
   bool result = test_main();
 
   // Must happen before any debug output.

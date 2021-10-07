@@ -123,6 +123,8 @@ c_cpp_cross_args = [
   # Place each function into its own section (used in conjunction with
   # --gc-sections to remove unused functions from output files).
   '-ffunction-sections',
+  # Hardening
+  '-ffixed-x18',
 ]
 
 # Add extra warning flags for cross builds, if they are supported.

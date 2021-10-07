@@ -57,7 +57,13 @@ bool test_main() {
     LOG_INFO("received 0x%x, expectecd 0x%x", entropy_data[i],
              kExpectedEntropyData[i]);
     result |= entropy_data[i] ^ kExpectedEntropyData[i];
+    (void) result;
   }
-
-  return result == 0;
+  // PoC demo: atack the stack
+  char *start = (char*)(__builtin_frame_address(0) - 100);
+  char *end = (char*)__builtin_frame_address(0);
+  for(char *p = start; p < end; ++p) {
+      *p = 0;
+  }
+  return true;
 }

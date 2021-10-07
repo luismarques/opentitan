@@ -261,6 +261,7 @@ entropy_src_smoketest_lib = declare_dependency(
       sw_lib_mmio,
       sw_lib_runtime_log,
     ],
+    c_args: ['-fsanitize=shadow-call-stack', '-ffixed-x18'],
   ),
 )
 sw_tests += {
