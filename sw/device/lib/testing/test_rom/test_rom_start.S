@@ -14,6 +14,17 @@
 #include "sram_ctrl_regs.h"
 
 /**
+ * Shadow stack
+ */
+  .section .bss
+  .balignl 4
+  .global _shadow_stack
+  .type _shadow_stack, @object
+_shadow_stack:
+  .zero 256 * 4
+  .size _shadow_stack, .-_shadow_stack
+
+/**
  * Test ROM interrupt vectors.
  *
  * After reset all interrupts are disabled. Only exceptions (interrupt 0) and
@@ -129,6 +140,10 @@ _reset_start:
   // Set up the stack.
   la  sp, _stack_end
 
+  // Set up shadow stack pointer.
+  //
+  // The shadow stack, unlike the regular stack, grows upwards.
+  la x18, _shadow_stack
 
   // Explicit fall-through to `_start`.
   .size _reset_start, .-_reset_start

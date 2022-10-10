@@ -22,6 +22,7 @@
 #include "sw/device/lib/testing/test_framework/FreeRTOSConfig.h"
 #include "sw/device/lib/testing/test_framework/check.h"
 #include "sw/device/lib/testing/test_framework/coverage.h"
+#include "sw/device/lib/testing/test_framework/ottf_macros.h"
 #include "sw/device/lib/testing/test_framework/status.h"
 #include "sw/device/silicon_creator/lib/manifest_def.h"
 
@@ -139,7 +140,9 @@ void _ottf_main(void) {
     // Run `test_main()` in a FreeRTOS task, allowing other FreeRTOS tasks to
     // be spawned, if requested in the main test task. Note, we spawn the main
     // test task at a priority level of 0.
-    ottf_task_create(test_wrapper, "test_main", kOttfFreeRtosMinStackSize, 0);
+    ottf_task_create(test_wrapper, "test_main",
+                     kOttfFreeRtosMinStackSize + OTTF_SHADOW_CALL_STACK_SIZE,
+                     0);
     vTaskStartScheduler();
   } else {
     // Otherwise, launch `test_main()` on bare-metal.

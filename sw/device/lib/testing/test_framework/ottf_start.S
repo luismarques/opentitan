@@ -3,6 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
+ * Shadow stack
+ */
+  .section .bss
+  .balignl 4
+  .global _shadow_stack
+  .type _shadow_stack, @object
+_shadow_stack:
+  .zero 256 * 4
+  .size _shadow_stack, .-_shadow_stack
+
+/**
  * OTTF Interrupt Vector.
  */
 
@@ -134,6 +145,11 @@ _ottf_start:
    * memory at addresses below `sp`.
    */
   la   sp, (_stack_end - 16)
+
+  // Set up shadow stack pointer.
+  //
+  // The shadow stack, unlike the regular stack, grows upwards.
+  la x18, _shadow_stack
 
   /**
    * Set well-defined interrupt/exception handlers.

@@ -12,5 +12,6 @@
 #define OTTF_TASK_DELETE_SELF_OR_DIE \
   ottf_task_delete_self();           \
   abort();
+#define OTTF_SHADOW_CALL_STACK_SIZE 128
 
 #endif  // OPENTITAN_SW_DEVICE_LIB_TESTING_TEST_FRAMEWORK_OTTF_MACROS_H_

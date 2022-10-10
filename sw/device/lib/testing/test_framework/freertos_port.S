@@ -60,7 +60,7 @@ xPortStartFirstTask:
   lw t0, 2 * OTTF_WORD_SIZE(sp)
 
   // Update the stack pointer (shrinking the stack).
-  addi sp, sp, OTTF_CONTEXT_SIZE
+  addi sp, sp, OTTF_CONTEXT_SIZE - OTTF_SHADOW_CALL_STACK_SIZE
 
   ret
   .size xPortStartFirstTask, .-xPortStartFirstTask
@@ -90,9 +90,9 @@ xPortStartFirstTask:
    * where the global and thread pointers are currently assumed to be constant,
    * and therefore are not saved:
    * 
-   * ---Stack Bottom---
-   * ---............---
+   * ---Stack bottom (higher values, original top)---
    * Offset - Reg/Value
+   *     30 - shadow call stack
    *     29 - mstatus
    *     28 - t6 (x31)
    *     27 - t5 (x30)
@@ -123,7 +123,7 @@ xPortStartFirstTask:
    *      2 - t0 (x5)
    *      1 - (return address for main task, 0 for now)
    *      0 - (pxCode)
-   * -----Stack Top----
+   * -----Stack top (lower values)----
    */
   .balign 4
   .global pxPortInitialiseStack
@@ -140,9 +140,13 @@ pxPortInitialiseStack:
   or t0, t0, t1
 
   // Setup the stack frame detailed above (a0 holds the task stack pointer).
-  addi a0, a0, -OTTF_CONTEXT_SIZE
+  addi a0, a0, -(OTTF_SHADOW_CALL_STACK_SIZE + OTTF_CONTEXT_SIZE)
   // Push MSTATUS onto the stack.
   sw t0, 29 * OTTF_WORD_SIZE(a0)
+
+  // Write into the stack slot for x18/s2 the shadow call stack pointer.
+  addi t2, a0, 30 * OTTF_WORD_SIZE
+  sw t2, 15 * OTTF_WORD_SIZE(a0)
 
   // Push task parameters (pvParameters that is in x12/a2, on the stack.
   sw a2, 7 * OTTF_WORD_SIZE(a0)

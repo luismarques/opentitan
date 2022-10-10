@@ -5,6 +5,17 @@
 #include "hw/top_earlgrey/sw/autogen/top_earlgrey_memory.h"
 
 /**
+ * Shadow stack
+ */
+  .section .bss
+  .balignl 4
+  .global _shadow_stack
+  .type _shadow_stack, @object
+_shadow_stack:
+  .zero 256 * 4
+  .size _shadow_stack, .-_shadow_stack
+
+/**
  * ROM_EXT Interrupt Vector
  */
   .section .vectors, "ax"
@@ -118,6 +129,11 @@ _start_boot:
   .option norelax
   la gp, __global_pointer$
   .option pop
+
+  // Set up shadow stack pointer.
+  //
+  // The shadow stack, unlike the regular stack, grows upwards.
+  la x18, _shadow_stack
 
   /**
    * Disable Interrupts.

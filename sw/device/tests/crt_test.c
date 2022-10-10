@@ -186,9 +186,11 @@ void _ottf_main(void) {
   }
 
   // Ensure that .bss was *actually* zeroed at the start of execution. If it
-  // wasn't, we note the offset from _bss_start at which it wasn't.
-  char *bss = &_bss_start;
-  ptrdiff_t bss_len = &_bss_end - &_bss_start;
+  // wasn't, we note the offset from _bss_start at which it wasn't. We skip the
+  // part of .bss being used for the shadow call stack, pointed to by x18 / s2.
+  char *bss;
+  asm("mv %[bss], x18;" : [bss] "=r"(bss));
+  ptrdiff_t bss_len = &_bss_end - bss;
   int bad_bss_index = -1;
   for (int i = 0; i < bss_len; ++i) {
     if (bss[i] != 0) {
