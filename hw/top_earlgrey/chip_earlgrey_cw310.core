@@ -98,6 +98,8 @@ targets:
     tools:
       vivado:
         part: "xc7k410tfbg676-1" # CW310 with K410T
+        vivado_options:
+          - '-stack 2000'
 
   lint:
     <<: *default_target
