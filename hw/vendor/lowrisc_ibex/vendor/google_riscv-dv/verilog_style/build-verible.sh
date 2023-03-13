@@ -48,9 +48,9 @@ fi
 # required for the run scripts to work.
 echo "Installing Verible ($VERIBLE_VERSION)..."
 
-mkdir -p build && cd build
+mkdir -p build && cd build || exit
 git clone https://github.com/google/verible.git
-cd verible
+cd verible || exit
 git pull origin master
 git checkout $VERIBLE_VERSION
 

@@ -25,9 +25,9 @@ echo 'return 0' >> compile.tcl
 $VSIM -c -do 'exit -code [source compile.tcl]'
 
 call_vsim() {
-    vlog $VIVADO_HOME/data/verilog/src/glbl.v
-    vlog $VIVADO_HOME/data/verilog/src/unisims/BSCANE2.v
-    vlog $VIVADO_HOME/data/verilog/src/unisims/JTAG_SIME2.v
+    vlog "$VIVADO_HOME"/data/verilog/src/glbl.v
+    vlog "$VIVADO_HOME"/data/verilog/src/unisims/BSCANE2.v
+    vlog "$VIVADO_HOME"/data/verilog/src/unisims/JTAG_SIME2.v
     echo "log -r /*; run -all" | $VSIM -c -coverage -voptargs='+acc +cover=sbecft' "$@" | tee vsim.log 2>&1
     grep "Errors: 0," vsim.log
 }
