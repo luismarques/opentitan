@@ -278,6 +278,7 @@ def opentitan_functest(
         dv = None,
         verilator = None,
         cw310 = None,
+        example = False,
         **kwargs):
     """A helper macro for generating OpenTitan functional tests.
 
@@ -307,6 +308,8 @@ def opentitan_functest(
       @param dv: DV test parameters.
       @param verilator: Verilator test parameters.
       @param cw310: CW310 test parameters.
+      @param example: if set to True, will generate target that can be `run` with bazel
+                      instead of generating test, and will not generate a test suite.
       @param **kwargs: Arguments to forward to `opentitan_flash_binary`.
 
     This macro emits the following rules:
@@ -574,14 +577,26 @@ def opentitan_functest(
         ########################################################################
         # Instantiate the test rule.
         ########################################################################
-        native.sh_test(
-            name = test_name,
-            srcs = [test_runner],
-            args = target_args,
-            data = target_data,
-            env = env,
-            **params
-        )
+        binary_args = {
+            "name": test_name,
+            "srcs": [test_runner],
+            "args": target_args,
+            "data": target_data,
+            "env": env,
+        }
+        binary_args.update(params)
+        if example:
+            # When generating an example, sh_binary does not take a `local` parameter
+            # because `bazel run` always runs without a sanbox, remove it in this case.
+            # Also remove timeout which does not exist for sh_binary.
+            binary_args.pop("local", None)
+            binary_args.pop("timeout", None)
+
+            # We need to mark the target as test only because pretty much all the
+            # artefacts, including the bitstream as marked as test only.
+            native.sh_binary(testonly = True, **binary_args)
+        else:
+            native.sh_test(**binary_args)
 
     # Guarantee that the test suite will only run tests in `all_tests`. This
     # check is necessary because `test_suite()` defaults to all the tests in the
@@ -589,25 +604,26 @@ def opentitan_functest(
     if all_tests == []:
         fail("Zero tests generated for :{}, test_suite() would run the wrong tests.".format(name))
 
-    ############################################################################
-    # Instantiate a suite of tests to run the same test on each hardware target.
-    ############################################################################
-    native.test_suite(
-        name = name,
-        tests = all_tests,
-        # In test_suites, tags perform a filtering function and will select
-        # matching tags internally instead of allowing filters to select
-        # test_suites.
-        # There are exceptions: "small", "medium", "large", "enourmous", "manual"
-        tags = [
-            # The manual tag is a special case and is applied to the test suite
-            # it prevents it from being included in wildcards so that
-            # --build_tag_filters=-verilator works as expected and excludes
-            # building verilator tests so the verilator build wont be invoked.
-            "manual",
-            # For more see https://bazel.build/reference/be/general#test_suite.tags
-        ],
-    )
+    if not example:
+        ############################################################################
+        # Instantiate a suite of tests to run the same test on each hardware target.
+        ############################################################################
+        native.test_suite(
+            name = name,
+            tests = all_tests,
+            # In test_suites, tags perform a filtering function and will select
+            # matching tags internally instead of allowing filters to select
+            # test_suites.
+            # There are exceptions: "small", "medium", "large", "enourmous", "manual"
+            tags = [
+                # The manual tag is a special case and is applied to the test suite
+                # it prevents it from being included in wildcards so that
+                # --build_tag_filters=-verilator works as expected and excludes
+                # building verilator tests so the verilator build wont be invoked.
+                "manual",
+                # For more see https://bazel.build/reference/be/general#test_suite.tags
+            ],
+        )
 
 def _manual_test_impl(ctx):
     executable = ctx.actions.declare_file("manual_test_wrapper")
