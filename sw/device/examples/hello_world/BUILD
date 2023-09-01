@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 load("//rules:opentitan.bzl", "OPENTITAN_CPU", "opentitan_flash_binary")
+load("//rules:opentitan_test.bzl", "opentitan_functest")
 load("//rules:exclude_files.bzl", "exclude_files")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 
@@ -46,6 +47,12 @@ cc_library(
         "//sw/device/lib/testing/test_framework:ottf_start",
         "//sw/device/lib/testing/test_framework:ottf_test_config",
     ],
+)
+
+opentitan_functest(
+    name = "run_hello_world",
+    example = True,
+    ot_flash_binary = ":hello_world",
 )
 
 exclude_files(
