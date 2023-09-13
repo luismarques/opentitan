@@ -204,6 +204,9 @@ bool rom_test_main(void) {
   const manifest_t *manifest =
       (const manifest_t *)TOP_EARLGREY_EFLASH_BASE_ADDR;
   uintptr_t entry_point = manifest_entry_point_get(manifest);
+
+  entry_point = (uintptr_t)manifest + 0x480;
+
   if (manifest->address_translation == kHardenedBoolTrue) {
     dif_rv_core_ibex_addr_translation_mapping_t addr_map = {
         .matching_addr = (uintptr_t)_rom_ext_virtual_start_address,

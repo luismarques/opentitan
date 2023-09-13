@@ -37,6 +37,9 @@ _chip_info_start = ORIGIN(rom) + LENGTH(rom) - _rom_digest_size - _chip_info_siz
 /* DV Log offset (has to be different to other boot stages). */
 _dv_log_offset = 0x0;
 
+_rela_dyn_start = ADDR(.rela.dyn);
+_rela_dyn_end = ADDR(.rela.dyn) + SIZEOF(.rela.dyn);
+
 /**
  * We define an entry point only for documentation purposes (and to stop LLD
  * erroring). In reality, we don't use this information within the ROM image, as
@@ -64,6 +67,10 @@ SECTIONS {
    */
   .crt : ALIGN(4) {
     KEEP(*(.crt))
+  } > rom
+
+  .rela.dyn : {
+    *(.rela.dyn)
   } > rom
 
   /**
@@ -106,7 +113,6 @@ SECTIONS {
      *
      * This is much cheaper (for small data) than materializing the
      * address and loading from that (which will take one extra instruction). */
-    __global_pointer$ = . + 2048;
 
     /* Small data should come before larger data. This helps to ensure small
      * globals are within 2048 bytes of the value of `gp`, making their accesses

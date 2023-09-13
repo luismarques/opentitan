@@ -58,6 +58,9 @@ _epmp_text_tor_lo = _text_start / 4;
 _epmp_text_tor_hi = _text_end / 4;
 _epmp_stack_guard_na4 = _stack_start / 4;
 
+_rela_dyn_start = ADDR(.rela.dyn);
+_rela_dyn_end = ADDR(.rela.dyn) + SIZEOF(.rela.dyn);
+
 ENTRY(_rom_start_boot);
 
 /**
@@ -165,7 +168,6 @@ SECTIONS {
      * This is much cheaper (for small data) than materializing the
      * address and loading from that (which will take one extra instruction).
      */
-    __global_pointer$ = . + 2048;
 
     /* Small BSS should come before regular BSS. This helps to ensure small
      * globals are within 2048 bytes of the value of `gp`, making their accesses

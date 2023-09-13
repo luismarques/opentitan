@@ -58,8 +58,7 @@ kMakeLowerCaseFnSize:
 get_name:
   // a0: beginning of string.
   // t0: beginning of replace string.
-  lui t0, %hi(name)
-  addi t0, t0, %lo(name)
+  la t0, name
 
   // t1: relative string pointer (cursor).
   mv t1, zero

@@ -49,6 +49,9 @@ _manifest_code_end = _text_end - _ottf_start_address;
  */
 _manifest_entry_point = _ottf_start - _ottf_start_address;
 
+_rela_dyn_start = ADDR(.rela.dyn);
+_rela_dyn_end = ADDR(.rela.dyn) + SIZEOF(.rela.dyn);
+
 /**
  * NOTE: We have to align each section to word boundaries as our current
  * s19->slm conversion scripts are not able to handle non-word aligned sections.
@@ -75,6 +78,10 @@ SECTIONS {
    */
   .crt : ALIGN(4) {
     KEEP(*(.crt))
+  } > ottf_flash
+
+  .rela.dyn : {
+    *(.rela.dyn)
   } > ottf_flash
 
   /**
@@ -157,7 +164,6 @@ SECTIONS {
      * This is much cheaper (for small data) than materializing the
      * address and loading from that (which will take one extra instruction).
      */
-    __global_pointer$ = . + 2048;
 
     /* SRAM programs embedded in functional tests must come first. */
     *(.data.sram_program)

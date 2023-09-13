@@ -92,7 +92,7 @@ _reset_start:
   // (or it will be relaxed to `mv gp, gp`).
   .option push
   .option norelax
-  la  gp, __global_pointer$
+  li gp, 0
   .option pop
 
   // Clobber all writeable registers.
@@ -238,8 +238,33 @@ _start:
   // Initialize the `.data` segment from the `.idata` segment.
   la   a0, _data_start
   la   a1, _data_end
-  la   a2, _data_init_start
+  //la   a2, _data_init_start
+  1: auipc a2, %pcrel_hi(_data_init_start)
+  addi  a2, a2, %pcrel_lo(1b)
   call crt_section_copy
+
+  la t0, _rela_dyn_end
+  la t4, _rela_dyn_start
+  li t1, 0x10000000
+  li t2, 0x10000000 + 0x20000
+  li t3, 0x00008000
+1:
+  lw t5, 0(t4)                    // t5 <- rel_data_entry->r_offset
+  bltu t5, t3, 4f                 // we have spurious entries in .rela.dyn (offset well below 0x8000), ignore those
+
+  //add t5, t5, s2                          // t5 <- rel_data_entry->r_offset + mem_offset
+  lw t6, 8(t4)                    // t6 <- rel_data_entry->r_addend
+  bltu t6, t1, 2f
+  bgtu t6, t2, 2f
+  //add t6, t6, s2                          // t6 <- rel_data_entry->r_addend + mem_offset
+  j 3f
+2:
+  //add t6, t6, s1                          // t6 <- rel_data_entry->r_addend + flash_offset
+3:
+  sw t6, 0(t5)
+4:
+  addi t4, t4, 12
+  bltu t4, t0, 1b
 
   // Clobber all temporary registers.
   li t0, 0x0

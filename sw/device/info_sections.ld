@@ -109,9 +109,11 @@
   *(.note)
   *(.note.*)
 
-  /* Relocations */
-  *(.rela.*)
-  *(.rela.dyn)
+  *(.dynsym)
+  *(.gnu.hash)
+  *(.hash)
+  *(.dynstr)
+  *(.dynamic)
 
   /* STAB Debugging Info - We Use DWARF */
   *(.stab)
