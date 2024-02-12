@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "sw/device/lib/runtime/print.h"
+#pragma clang optimize off
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -67,7 +68,7 @@ void base_set_stdout(buffer_sink_t out) {
   base_stdout = out;
 }
 
-static size_t base_dev_uart(void *data, const char *buf, size_t len) {
+size_t base_dev_uart(void *data, const char *buf, size_t len) {
   const dif_uart_t *uart = (const dif_uart_t *)data;
   for (size_t i = 0; i < len; ++i) {
     if (dif_uart_byte_send_polled(uart, (uint8_t)buf[i]) != kDifOk) {

@@ -67,73 +67,74 @@ static inline uintptr_t rom_ext_vma_get(const manifest_t *manifest,
   return (lma_addr - (uintptr_t)manifest +
           (uintptr_t)_rom_ext_virtual_start_address);
 }
+size_t base_dev_uart(void *data, const char *buf, size_t len);
 
 // `test_in_rom = True` tests can override this symbol to provide their own
 // rom tests. By default, it simply jumps into the OTTF's flash.
 OT_WEAK
 bool rom_test_main(void) {
-#if !OT_IS_ENGLISH_BREAKFAST
-  // Check the otp to see if execute should start
-  uint32_t otp_val = abs_mmio_read32(
-      TOP_EARLGREY_OTP_CTRL_CORE_BASE_ADDR + OTP_CTRL_SW_CFG_WINDOW_REG_OFFSET +
-      OTP_CTRL_PARAM_CREATOR_SW_CFG_ROM_EXEC_EN_OFFSET);
+// #if !OT_IS_ENGLISH_BREAKFAST
+//   // Check the otp to see if execute should start
+//   uint32_t otp_val = abs_mmio_read32(
+//       TOP_EARLGREY_OTP_CTRL_CORE_BASE_ADDR + OTP_CTRL_SW_CFG_WINDOW_REG_OFFSET +
+//       OTP_CTRL_PARAM_CREATOR_SW_CFG_ROM_EXEC_EN_OFFSET);
 
-  if (otp_val == 0) {
-    test_status_set(kTestStatusInBootRomHalt);
-    // Abort simply forever loops on a wait_for_interrupt;
-    abort();
-  }
+//   if (otp_val == 0) {
+//     test_status_set(kTestStatusInBootRomHalt);
+//     // Abort simply forever loops on a wait_for_interrupt;
+//     abort();
+//   }
 
-  // Initialize Ibex cpuctrl (contains icache / security feature enablements).
-  uint32_t cpuctrl_csr;
-  CSR_READ(CSR_REG_CPUCTRL, &cpuctrl_csr);
-  uint32_t cpuctrl_otp_val = abs_mmio_read32(
-      TOP_EARLGREY_OTP_CTRL_CORE_BASE_ADDR + OTP_CTRL_SW_CFG_WINDOW_REG_OFFSET +
-      OTP_CTRL_PARAM_CREATOR_SW_CFG_CPUCTRL_OFFSET);
-  cpuctrl_csr = bitfield_field32_write(
-      cpuctrl_csr, (bitfield_field32_t){.mask = 0x3f, .index = 0},
-      cpuctrl_otp_val);
-  CSR_WRITE(CSR_REG_CPUCTRL, cpuctrl_csr);
-#endif
+//   // Initialize Ibex cpuctrl (contains icache / security feature enablements).
+//   uint32_t cpuctrl_csr;
+//   CSR_READ(CSR_REG_CPUCTRL, &cpuctrl_csr);
+//   uint32_t cpuctrl_otp_val = abs_mmio_read32(
+//       TOP_EARLGREY_OTP_CTRL_CORE_BASE_ADDR + OTP_CTRL_SW_CFG_WINDOW_REG_OFFSET +
+//       OTP_CTRL_PARAM_CREATOR_SW_CFG_CPUCTRL_OFFSET);
+//   cpuctrl_csr = bitfield_field32_write(
+//       cpuctrl_csr, (bitfield_field32_t){.mask = 0x3f, .index = 0},
+//       cpuctrl_otp_val);
+//   CSR_WRITE(CSR_REG_CPUCTRL, cpuctrl_csr);
+// #endif
 
-  // Initial sec_mmio, required by bootstrap and its dependencies.
-  sec_mmio_init();
+//   // Initial sec_mmio, required by bootstrap and its dependencies.
+//   sec_mmio_init();
 
   // Configure the pinmux.
   CHECK_DIF_OK(dif_pinmux_init(
       mmio_region_from_addr(TOP_EARLGREY_PINMUX_AON_BASE_ADDR), &pinmux));
   pinmux_testutils_init(&pinmux);
 
-  CHECK_DIF_OK(dif_rstmgr_init(
-      mmio_region_from_addr(TOP_EARLGREY_RSTMGR_AON_BASE_ADDR), &rstmgr));
+//   CHECK_DIF_OK(dif_rstmgr_init(
+//       mmio_region_from_addr(TOP_EARLGREY_RSTMGR_AON_BASE_ADDR), &rstmgr));
 
-  // Initialize the flash.
-  CHECK_DIF_OK(dif_flash_ctrl_init_state(
-      &flash_ctrl,
-      mmio_region_from_addr(TOP_EARLGREY_FLASH_CTRL_CORE_BASE_ADDR)));
-  CHECK_DIF_OK(dif_flash_ctrl_start_controller_init(&flash_ctrl));
-  CHECK_STATUS_OK(flash_ctrl_testutils_wait_for_init(&flash_ctrl));
-#if !OT_IS_ENGLISH_BREAKFAST
-  // Check the otp to see if flash scramble should be enabled.
-  otp_val = abs_mmio_read32(
-      TOP_EARLGREY_OTP_CTRL_CORE_BASE_ADDR + OTP_CTRL_SW_CFG_WINDOW_REG_OFFSET +
-      OTP_CTRL_PARAM_CREATOR_SW_CFG_FLASH_DATA_DEFAULT_CFG_OFFSET);
-  if (otp_val != 0) {
-    dif_flash_ctrl_region_properties_t default_properties;
-    CHECK_DIF_OK(dif_flash_ctrl_get_default_region_properties(
-        &flash_ctrl, &default_properties));
-    default_properties.scramble_en =
-        bitfield_field32_read(otp_val, FLASH_CTRL_OTP_FIELD_SCRAMBLING);
-    default_properties.ecc_en =
-        bitfield_field32_read(otp_val, FLASH_CTRL_OTP_FIELD_ECC);
-    default_properties.high_endurance_en =
-        bitfield_field32_read(otp_val, FLASH_CTRL_OTP_FIELD_HE);
-    CHECK_DIF_OK(dif_flash_ctrl_set_default_region_properties(
-        &flash_ctrl, default_properties));
-  }
-#endif
-  CHECK_DIF_OK(
-      dif_flash_ctrl_set_flash_enablement(&flash_ctrl, kDifToggleEnabled));
+//   // Initialize the flash.
+//   CHECK_DIF_OK(dif_flash_ctrl_init_state(
+//       &flash_ctrl,
+//       mmio_region_from_addr(TOP_EARLGREY_FLASH_CTRL_CORE_BASE_ADDR)));
+//   CHECK_DIF_OK(dif_flash_ctrl_start_controller_init(&flash_ctrl));
+//   CHECK_STATUS_OK(flash_ctrl_testutils_wait_for_init(&flash_ctrl));
+// #if !OT_IS_ENGLISH_BREAKFAST
+//   // Check the otp to see if flash scramble should be enabled.
+//   otp_val = abs_mmio_read32(
+//       TOP_EARLGREY_OTP_CTRL_CORE_BASE_ADDR + OTP_CTRL_SW_CFG_WINDOW_REG_OFFSET +
+//       OTP_CTRL_PARAM_CREATOR_SW_CFG_FLASH_DATA_DEFAULT_CFG_OFFSET);
+//   if (otp_val != 0) {
+//     dif_flash_ctrl_region_properties_t default_properties;
+//     CHECK_DIF_OK(dif_flash_ctrl_get_default_region_properties(
+//         &flash_ctrl, &default_properties));
+//     default_properties.scramble_en =
+//         bitfield_field32_read(otp_val, FLASH_CTRL_OTP_FIELD_SCRAMBLING);
+//     default_properties.ecc_en =
+//         bitfield_field32_read(otp_val, FLASH_CTRL_OTP_FIELD_ECC);
+//     default_properties.high_endurance_en =
+//         bitfield_field32_read(otp_val, FLASH_CTRL_OTP_FIELD_HE);
+//     CHECK_DIF_OK(dif_flash_ctrl_set_default_region_properties(
+//         &flash_ctrl, default_properties));
+//   }
+// #endif
+//   CHECK_DIF_OK(
+//       dif_flash_ctrl_set_flash_enablement(&flash_ctrl, kDifToggleEnabled));
 
   // Setup the UART for printing messages to the console.
   if (kDeviceType != kDeviceSimDV) {
@@ -151,7 +152,8 @@ bool rom_test_main(void) {
                     .tx_enable = kDifToggleEnabled,
                     .rx_enable = kDifToggleEnabled,
                 }));
-    base_uart_stdout(&uart0);
+    base_dev_uart(&uart0, "LUIS test\n", 10);
+    while(1) {}
   }
 
   // Print the chip version information
@@ -235,6 +237,8 @@ bool rom_test_main(void) {
 }
 
 void _boot_start(void) {
+  rom_test_main();
+
   test_status_set(kTestStatusInBootRom);
   test_status_set(rom_test_main() ? kTestStatusPassed : kTestStatusFailed);
 

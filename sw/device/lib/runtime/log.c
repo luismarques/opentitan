@@ -10,6 +10,7 @@
 #include "sw/device/lib/base/memory.h"
 #include "sw/device/lib/base/mmio.h"
 #include "sw/device/lib/runtime/print.h"
+#pragma clang optimize off
 
 /**
  * Ensure that log_fields_t is always 20 bytes.

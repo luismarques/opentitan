@@ -17,15 +17,15 @@
 
 void pinmux_testutils_init(dif_pinmux_t *pinmux) {
   // Set up SW straps on IOC0-IOC2, for GPIOs 22-24
-  CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
-                                       kTopEarlgreyPinmuxPeripheralInGpioGpio22,
-                                       kTopEarlgreyPinmuxInselIoc0));
-  CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
-                                       kTopEarlgreyPinmuxPeripheralInGpioGpio23,
-                                       kTopEarlgreyPinmuxInselIoc1));
-  CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
-                                       kTopEarlgreyPinmuxPeripheralInGpioGpio24,
-                                       kTopEarlgreyPinmuxInselIoc2));
+  // CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
+  //                                      kTopEarlgreyPinmuxPeripheralInGpioGpio22,
+  //                                      kTopEarlgreyPinmuxInselIoc0));
+  // CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
+  //                                      kTopEarlgreyPinmuxPeripheralInGpioGpio23,
+  //                                      kTopEarlgreyPinmuxInselIoc1));
+  // CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
+  //                                      kTopEarlgreyPinmuxPeripheralInGpioGpio24,
+  //                                      kTopEarlgreyPinmuxInselIoc2));
 
   // Configure UART0 RX input to connect to MIO pad IOC3
   CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
@@ -37,60 +37,60 @@ void pinmux_testutils_init(dif_pinmux_t *pinmux) {
   CHECK_DIF_OK(dif_pinmux_output_select(pinmux, kTopEarlgreyPinmuxMioOutIoc4,
                                         kTopEarlgreyPinmuxOutselUart0Tx));
 
-#if !OT_IS_ENGLISH_BREAKFAST
-  // Enable pull-ups on UART0 RX
-  // Pull-ups are available only on certain platforms.
-  if (kDeviceType == kDeviceSimDV) {
-    dif_pinmux_pad_attr_t out_attr;
-    dif_pinmux_pad_attr_t in_attr = {
-        .slew_rate = 0,
-        .drive_strength = 0,
-        .flags = kDifPinmuxPadAttrPullResistorEnable |
-                 kDifPinmuxPadAttrPullResistorUp};
+// #if !OT_IS_ENGLISH_BREAKFAST
+//   // Enable pull-ups on UART0 RX
+//   // Pull-ups are available only on certain platforms.
+//   if (kDeviceType == kDeviceSimDV) {
+//     dif_pinmux_pad_attr_t out_attr;
+//     dif_pinmux_pad_attr_t in_attr = {
+//         .slew_rate = 0,
+//         .drive_strength = 0,
+//         .flags = kDifPinmuxPadAttrPullResistorEnable |
+//                  kDifPinmuxPadAttrPullResistorUp};
 
-    CHECK_DIF_OK(dif_pinmux_pad_write_attrs(pinmux, kTopEarlgreyMuxedPadsIoc3,
-                                            kDifPinmuxPadKindMio, in_attr,
-                                            &out_attr));
-  };
+//     CHECK_DIF_OK(dif_pinmux_pad_write_attrs(pinmux, kTopEarlgreyMuxedPadsIoc3,
+//                                             kDifPinmuxPadKindMio, in_attr,
+//                                             &out_attr));
+//   };
 
-  // Configure UART1 RX input to connect to MIO pad IOB4
-  CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
-                                       kTopEarlgreyPinmuxPeripheralInUart1Rx,
-                                       kTopEarlgreyPinmuxInselIob4));
-  CHECK_DIF_OK(dif_pinmux_output_select(pinmux, kTopEarlgreyPinmuxMioOutIob4,
-                                        kTopEarlgreyPinmuxOutselConstantHighZ));
-  // Configure UART1 TX output to connect to MIO pad IOB5
-  CHECK_DIF_OK(dif_pinmux_output_select(pinmux, kTopEarlgreyPinmuxMioOutIob5,
-                                        kTopEarlgreyPinmuxOutselUart1Tx));
+//   // Configure UART1 RX input to connect to MIO pad IOB4
+//   CHECK_DIF_OK(dif_pinmux_input_select(pinmux,
+//                                        kTopEarlgreyPinmuxPeripheralInUart1Rx,
+//                                        kTopEarlgreyPinmuxInselIob4));
+//   CHECK_DIF_OK(dif_pinmux_output_select(pinmux, kTopEarlgreyPinmuxMioOutIob4,
+//                                         kTopEarlgreyPinmuxOutselConstantHighZ));
+//   // Configure UART1 TX output to connect to MIO pad IOB5
+//   CHECK_DIF_OK(dif_pinmux_output_select(pinmux, kTopEarlgreyPinmuxMioOutIob5,
+//                                         kTopEarlgreyPinmuxOutselUart1Tx));
 
-  // Configure a higher drive strength for the USB_P and USB_N pads because we
-  // must the pad drivers must be capable of overpowering the 'pull' signal
-  // strength of the internal pull ups in the differential receiver.
-  //
-  // 'pull' strength is required because at the host end of the USB, there
-  // are 'weak' pull downs, allowing it to detect device presence when it
-  // applies its pull up.
-  //    strong PAD driver > internal pull up > weak pull down at host
-  //
-  // Normally the pull up on USB_P will be asserted, but we may be employing
-  // 'pin flipping' and instead choose to apply the _N pull up.
-  if (kDeviceType == kDeviceSimDV) {
-    dif_pinmux_pad_attr_t out_attr;
-    dif_pinmux_pad_attr_t in_attr = {
-        .slew_rate = 0, .drive_strength = 1, .flags = 0};
+//   // Configure a higher drive strength for the USB_P and USB_N pads because we
+//   // must the pad drivers must be capable of overpowering the 'pull' signal
+//   // strength of the internal pull ups in the differential receiver.
+//   //
+//   // 'pull' strength is required because at the host end of the USB, there
+//   // are 'weak' pull downs, allowing it to detect device presence when it
+//   // applies its pull up.
+//   //    strong PAD driver > internal pull up > weak pull down at host
+//   //
+//   // Normally the pull up on USB_P will be asserted, but we may be employing
+//   // 'pin flipping' and instead choose to apply the _N pull up.
+//   if (kDeviceType == kDeviceSimDV) {
+//     dif_pinmux_pad_attr_t out_attr;
+//     dif_pinmux_pad_attr_t in_attr = {
+//         .slew_rate = 0, .drive_strength = 1, .flags = 0};
 
-    CHECK_DIF_OK(
-        dif_pinmux_pad_write_attrs(pinmux, kTopEarlgreyDirectPadsUsbdevUsbDp,
-                                   kDifPinmuxPadKindDio, in_attr, &out_attr));
-    CHECK_DIF_OK(
-        dif_pinmux_pad_write_attrs(pinmux, kTopEarlgreyDirectPadsUsbdevUsbDn,
-                                   kDifPinmuxPadKindDio, in_attr, &out_attr));
-  }
-#endif
+//     CHECK_DIF_OK(
+//         dif_pinmux_pad_write_attrs(pinmux, kTopEarlgreyDirectPadsUsbdevUsbDp,
+//                                    kDifPinmuxPadKindDio, in_attr, &out_attr));
+//     CHECK_DIF_OK(
+//         dif_pinmux_pad_write_attrs(pinmux, kTopEarlgreyDirectPadsUsbdevUsbDn,
+//                                    kDifPinmuxPadKindDio, in_attr, &out_attr));
+//   }
+// #endif
 
-  // Configure USBDEV SENSE outputs to be high-Z (IOC7)
-  CHECK_DIF_OK(dif_pinmux_output_select(pinmux, kTopEarlgreyPinmuxMioOutIoc7,
-                                        kTopEarlgreyPinmuxOutselConstantHighZ));
+//   // Configure USBDEV SENSE outputs to be high-Z (IOC7)
+//   CHECK_DIF_OK(dif_pinmux_output_select(pinmux, kTopEarlgreyPinmuxMioOutIoc7,
+//                                         kTopEarlgreyPinmuxOutselConstantHighZ));
 }
 
 // Mapping of Chip IOs to the GPIO peripheral.
