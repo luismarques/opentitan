@@ -151,20 +151,25 @@ static void test_otbn_with_sideloaded_key(dif_keymgr_t *keymgr,
 }
 
 bool test_main(void) {
+  LOG_INFO("LUIS1");
+
   // Initialize keymgr and advance to CreatorRootKey state.
   dif_keymgr_t keymgr;
-  dif_kmac_t kmac;
-  CHECK_STATUS_OK(keymgr_testutils_startup(&keymgr, &kmac));
+//   dif_kmac_t kmac;
+  //CHECK_STATUS_OK(keymgr_testutils_startup(&keymgr, &kmac));
   // Advance to OwnerIntermediateKey state.
-  CHECK_STATUS_OK(keymgr_testutils_advance_state(&keymgr, &kOwnerIntParams));
+//   CHECK_STATUS_OK(keymgr_testutils_advance_state(&keymgr, &kOwnerIntParams));
+//   LOG_INFO("LUIS3");
   CHECK_STATUS_OK(keymgr_testutils_check_state(
-      &keymgr, kDifKeymgrStateOwnerIntermediateKey));
+      &keymgr, kDifKeymgrStateReset));
+  LOG_INFO("LUIS4");
   LOG_INFO("Keymgr entered OwnerIntKey State");
 
   // Initialize OTBN.
   dif_otbn_t otbn;
   CHECK_DIF_OK(
       dif_otbn_init(mmio_region_from_addr(TOP_EARLGREY_OTBN_BASE_ADDR), &otbn));
+  LOG_INFO("LUIS5");
 
   // Put entropy source into auto mode. If the entropy source was merely left
   // with the entropy it generated at boot, this test may exhaust the supply

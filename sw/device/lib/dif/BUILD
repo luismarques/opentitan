@@ -606,6 +606,7 @@ cc_library(
         "//sw/device/lib/base:memory",
         "//sw/device/lib/base:mmio",
         "//sw/device/lib/base:multibits",
+        "//sw/device/lib/runtime:log",
     ],
 )
 
