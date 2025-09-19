@@ -191,6 +191,7 @@ def gen_flash(ctx, **kwargs):
             # binary has not been regenerated, however Bazel often messes with
             # mtimes causing false negatives.
             "--ignore-time",
+            "--accept-invalid",
             out.path,
         ],
         mnemonic = "FlashGen",

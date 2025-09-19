@@ -9,6 +9,7 @@ load(
     "get_lc_items",
 )
 load("//rules/opentitan:keyutils.bzl", "ECDSA_ONLY_KEY_STRUCTS")
+load("//rules/opentitan:keyutils.bzl", "ECDSA_SPX_KEY_STRUCTS")
 load(
     "//rules:otp.bzl",
     "STD_OTP_OVERLAYS",
@@ -24,6 +25,7 @@ load(
     "OPENTITAN_CPU",
     "dv_params",
     "ecdsa_key_for_lc_state",
+    "spx_key_for_lc_state",
     "fpga_params",
     "opentitan_binary",
     "opentitan_test",
@@ -4625,6 +4627,46 @@ opentitan_test(
         "//sw/device/lib/base:mmio",
         "//sw/device/lib/dif:uart",
         "//sw/device/lib/runtime:hart",
+        "//sw/device/lib/testing/test_framework:ottf_main",
+    ],
+)
+
+opentitan_test(
+    name = "lc_ctrl_smoketest",
+    srcs = ["lc_ctrl_smoketest.c"],
+    exec_env = dicts.add(
+        EARLGREY_TEST_ENVS,
+        EARLGREY_SILICON_OWNER_ROM_EXT_ENVS,
+        EARLGREY_CW340_TEST_ENVS,
+        {
+            "//hw/top_earlgrey:silicon_creator": None,
+        },
+    ),
+    ecdsa_key = ecdsa_key_for_lc_state(
+        ECDSA_ONLY_KEY_STRUCTS,
+        CONST.LCV.PROD,
+    ),
+    fpga = fpga_params(
+        changes_otp = True,
+        otp = "//hw/ip/otp_ctrl/data/earlgrey_skus/emulation:otp_img_test_unlocked1_manuf_individualized", # 1.0 branch
+        # otp = "//hw/top_earlgrey/data/otp/emulation:otp_img_test_unlocked1_manuf_individualized", # master branch
+
+    ),
+    qemu = qemu_params(
+        otp = "//hw/ip/otp_ctrl/data/earlgrey_skus/emulation:otp_img_test_unlocked1_manuf_individualized", # 1.0 branch
+    ),
+    spx_key = spx_key_for_lc_state(
+        ECDSA_SPX_KEY_STRUCTS,
+        CONST.LCV.PROD,
+    ),
+    deps = [
+        "//sw/device/lib/arch:device",
+        "//sw/device/lib/base:mmio",
+        "//sw/device/lib/dif:aon_timer",
+        "//sw/device/lib/dif:lc_ctrl",
+        "//sw/device/lib/dif:pwrmgr",
+        "//sw/device/lib/runtime:hart",
+        "//sw/device/lib/testing:aon_timer_testutils",
         "//sw/device/lib/testing/test_framework:ottf_main",
     ],
 )
