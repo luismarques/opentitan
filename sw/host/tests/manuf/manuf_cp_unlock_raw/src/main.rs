@@ -24,46 +24,17 @@ struct Opts {
 }
 
 fn manuf_cp_unlock_raw(opts: &Opts, transport: &TransportWrapper) -> Result<()> {
-    // Set the TAP straps for the lifecycle controller and reset.
-    transport
-        .pin_strapping("PINMUX_TAP_LC")?
-        .apply()
-        .context("failed to apply LC TAP strapping")?;
-    transport.reset(UartRx::Clear).context("failed to reset")?;
-
-    // Connect to the LC TAP via JTAG.
+    transport.pin_strapping("PINMUX_TAP_RISCV")?.apply()?;
+    transport.reset(UartRx::Clear)?;
     let mut jtag = opts
         .init
         .jtag_params
         .create(transport)?
-        .connect(JtagTap::LcTap)
-        .context("failed to connect to LC TAP over JTAG")?;
+        .connect(JtagTap::RiscvTap)
+        .context("failed to connect to RISC-V TAP over JTAG")?;
 
-    // Provide the `RAW_UNLOCK` token
-    let token = DifLcCtrlToken::from(lc_raw_unlock_token::RND_CNST_RAW_UNLOCK_TOKEN.to_le_bytes());
-    let token_words = token.into_register_values();
-
-    // ROM execution is not enabled in the OTP so we can safely reconnect to the LC TAP after
-    // the transition without risking the chip resetting.
-    lc_transition::trigger_lc_transition(
-        transport,
-        jtag,
-        DifLcCtrlState::TestUnlocked0,
-        Some(token_words),
-        true,
-        Some(JtagTap::LcTap),
-    )
-    .context("failed to transition to TEST_UNLOCKED0")?;
-
-    jtag = opts
-        .init
-        .jtag_params
-        .create(transport)?
-        .connect(JtagTap::LcTap)?;
-
-    // Check that LC state is `TEST_UNLOCKED0`.
-    let state = jtag.read_lc_ctrl_reg(&LcCtrlReg::LcState)?;
-    assert_eq!(state, DifLcCtrlState::TestUnlocked0.redundant_encoding());
+    jtag.disconnect()?;
+    transport.reset(UartRx::Clear)?;
 
     Ok(())
 }

@@ -15,6 +15,7 @@ load(
     "//rules/opentitan:defs.bzl",
     "ecdsa_key_for_lc_state",
     "fpga_params",
+    "qemu_params",
     "opentitan_binary",
     "opentitan_test",
     "silicon_params",
@@ -122,6 +123,7 @@ opentitan_test(
     exec_env = {
         "//hw/top_earlgrey:fpga_cw340_sival": None,
         "//hw/top_earlgrey:fpga_hyper310_rom_with_fake_keys": None,
+        "//hw/top_earlgrey:sim_qemu_rom_with_fake_keys": None,
     },
     fpga = fpga_params(
         changes_otp = True,
@@ -129,6 +131,11 @@ opentitan_test(
         otp = "//hw/ip/otp_ctrl/data:img_raw",
         tags = ["manuf"],
         test_harness = "//sw/host/tests/manuf/manuf_cp_unlock_raw",
+    ),
+    qemu = qemu_params(
+        test_harness = "//sw/host/tests/manuf/manuf_cp_unlock_raw",
+        needs_jtag = True,
+        otp = "//hw/ip/otp_ctrl/data:img_raw",
     ),
     deps = [
         "//hw/ip/otp_ctrl/data:otp_ctrl_c_regs",
