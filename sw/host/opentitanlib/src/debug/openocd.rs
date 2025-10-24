@@ -303,6 +303,7 @@ pub struct OpenOcdJtagTap {
 impl OpenOcdJtagTap {
     /// Send a TCL command to OpenOCD and wait for its response.
     fn send_tcl_cmd(&mut self, cmd: &str) -> Result<String> {
+        println!("LUIS JTAG cmd: {cmd}");
         self.openocd.execute(cmd)
     }
 

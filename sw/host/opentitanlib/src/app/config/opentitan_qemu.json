@@ -80,6 +80,11 @@
       "pins": [],
     },
     {
+      "name": "PINMUX_TAP_LC",
+      "pins": [
+      ]
+    },
+    {
       "name": "SPI_TPM"
     }
   ],
