@@ -8,9 +8,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
+use rand::Rng;
 
 use object::{Object, ObjectSymbol};
-use opentitanlib::app::TransportWrapper;
+use opentitanlib::app::{TransportWrapper, UartRx};
 use opentitanlib::execute_test;
 use opentitanlib::test_utils::init::InitializeTest;
 use opentitanlib::test_utils::mem::{MemRead32Req, MemReadReq, MemWrite32Req, MemWriteReq};
@@ -99,6 +100,15 @@ fn main() -> Result<()> {
     uart.set_flow_control(true)?;
     let _ = UartConsole::wait_for(&*uart, r"Running [^\r\n]*", opts.timeout)?;
     let _ = uart.clear_rx_buffer();
+
+    let mut rng = rand::thread_rng();
+    // let delay = 500; //rng.gen_range(500..3000);
+    let delay = rng.gen_range(3000..10000);
+    for _ in 0..100 {
+        std::thread::sleep(Duration::from_millis(delay));
+        transport.reset(UartRx::Clear)?;
+        let _ = UartConsole::wait_for(&*uart, r"ROM:1d1f96ca", opts.timeout)?;
+    }
 
     execute_test!(
         test_mem_word_commands,

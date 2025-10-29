@@ -20,5 +20,6 @@ rust_binary(
         "@crate_index//:object",
         "@crate_index//:once_cell",
         "@crate_index//:serde_json",
+        "@crate_index//:rand",
     ],
 )

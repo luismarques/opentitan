@@ -1674,6 +1674,13 @@ opentitan_test(
         ]),
         test_harness = "//sw/host/tests/chip/mem",
     ),
+    qemu = qemu_params(
+        test_cmd = " ".join([
+            "--bootstrap=\"{firmware}\"",
+            "\"{firmware:elf}\"",
+        ]),
+        test_harness = "//sw/host/tests/chip/mem",
+    ),
     deps = [
         "//sw/device/lib/testing/json:command",
         "//sw/device/lib/testing/test_framework:check",
