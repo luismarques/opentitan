@@ -78,6 +78,9 @@ pub struct Qemu {
 
     /// Debug module JTAG.
     jtag_sock: Option<PathBuf>,
+
+    /// LC Ctrl JTAG TAP socket.
+    lcctrl_jtag_sock: Option<PathBuf>,
 }
 
 impl Qemu {
@@ -224,6 +227,15 @@ impl Qemu {
             }
         };
 
+        // LC Ctrl JTAG tap:
+        let lcctrl_jtag_sock = match find_chardev(&chardevs, "taprbb-lc-ctrl") {
+            Some(ChardevKind::Socket { path }) => Some(path.clone()),
+            _ => {
+                log::info!("could not find socket chardev with id=taprbb-lc-ctrl, skipping JTAG for LC Ctrl");
+                None
+            }
+        };
+
         // Resetting is done over the monitor, but we model it like a pin to enable strapping it.
         let reset = QemuReset::new(Rc::clone(&monitor));
         let reset = Rc::new(reset);
@@ -242,6 +254,7 @@ impl Qemu {
             i2cs,
             gpio,
             jtag_sock,
+            lcctrl_jtag_sock,
         })
     }
 }
@@ -328,7 +341,7 @@ impl Transport for Qemu {
         let jtag = OpenOcdJtagChain::new(
             &format!(
                 "adapter driver remote_bitbang; remote_bitbang port 0; remote_bitbang host {sock}",
-                sock = self.jtag_sock.as_ref().unwrap().display(),
+                sock = self.lcctrl_jtag_sock.as_ref().unwrap().display(),
             ),
             opts,
         )?;

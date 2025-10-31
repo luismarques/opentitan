@@ -141,6 +141,7 @@ opentitan_test(
         traces = [
             "ot_lc*",
             "ot_otp_load_token*",
+            "tap_ctrl_rbb_register"
         ],
     ),
     deps = [
