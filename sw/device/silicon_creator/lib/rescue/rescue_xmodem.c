@@ -103,6 +103,8 @@ static rom_error_t protocol(rescue_state_t *state) {
       continue;
     }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch-enum"
     switch (result) {
       case kErrorOk:
         // Packet ok. Cancel the inactivity deadline.
@@ -146,6 +148,7 @@ static rom_error_t protocol(rescue_state_t *state) {
       default:
         return result;
     }
+#pragma GCC diagnostic pop
     state->frame += 1;
   }
 }

@@ -311,6 +311,8 @@ void ottf_external_isr(uint32_t *exc_info) {
         "Interrupt from incorrect peripheral: exp = %d, obs = %d",
         peripheral_expected, peripheral);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch-enum"
   switch (peripheral) {
 #if TEST_MIN_IRQ_PERIPHERAL <= 0 && 0 < TEST_MAX_IRQ_PERIPHERAL
     case kTopDarjeelingPlicPeripheralAlertHandler: {
@@ -1070,10 +1072,13 @@ void ottf_external_isr(uint32_t *exc_info) {
     }
 #endif
 
+    case kTopEarlgreyPlicPeripheralUnknown:
     default:
       LOG_FATAL("ISR is not implemented!");
       test_status_set(kTestStatusFailed);
   }
+#pragma GCC diagnostic pop
+
   // Complete the IRQ at PLIC.
   CHECK_DIF_OK(dif_rv_plic_irq_complete(&plic, kHart, plic_irq_id));
 }
