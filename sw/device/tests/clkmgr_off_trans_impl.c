@@ -239,6 +239,7 @@ bool execute_off_trans_test(test_trans_block_t block) {
         info[trans].crash_function = otbn_csr_access;
         break;
 
+      case kTestTransCount: // TODO: change to *Last or separate enum?
       default:
         LOG_ERROR("Invalid/unrecognised IP block type (%d)", trans);
         break;

@@ -48,6 +48,9 @@ status_t lc_ctrl_testutils_lc_state_log(const dif_lc_ctrl_state_t *state) {
     case kDifLcCtrlStateRma:
       LOG_INFO("Life cycle state: RMA");
       break;
+    case kDifLcCtrlStateRaw:
+    case kDifLcCtrlStateTestLocked0:
+    case kDifLcCtrlStateTestLocked1:
     default:
       LOG_ERROR("CPU is executing in locked/invalid life cycle state: %d",
                 (uint32_t)state);

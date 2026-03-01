@@ -11,6 +11,8 @@ status_t ujson_ottf_dispatch(ujson_t *uj, test_command_t command) {
   if (uj == NULL) {
     return INVALID_ARGUMENT();
   }
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch-enum"
   switch (command) {
     case kTestCommandMemRead32:
       RESP_ERR(uj, ujcmd_mem_read32(uj));
@@ -28,4 +30,5 @@ status_t ujson_ottf_dispatch(ujson_t *uj, test_command_t command) {
       return UNIMPLEMENTED();
   }
   return OK_STATUS();
+#pragma GCC diagnostic pop
 }

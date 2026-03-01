@@ -71,6 +71,7 @@ dif_result_t dif_sysrst_ctrl_key_combo_detect_configure(
       combo_detect_ctl_reg_offset = SYSRST_CTRL_COM_DET_CTL_3_REG_OFFSET;
       combo_action_ctl_reg_offset = SYSRST_CTRL_COM_OUT_CTL_3_REG_OFFSET;
       break;
+    case kDifSysrstCtrlKeyComboAll:
     default:
       return kDifBadArg;
   }
