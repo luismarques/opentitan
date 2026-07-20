@@ -11,7 +11,7 @@ sh_library(
 
 [
     sh_test(
-        name = "slh_dsa_test_{}".format(parameter_set),
+        name = "slh_dsa_generate_test_{}".format(parameter_set),
         srcs = ["hsmtool_runner.sh"],
         args = [
             "--module=$(rootpath @softhsm2//:gen_dir)/lib/softhsm/libsofthsm2.so",
@@ -46,6 +46,39 @@ sh_library(
         "shake-256f",
     ]
 ]
+
+sh_test(
+    name = "slh_dsa_sign_test",
+    srcs = ["hsmtool_runner.sh"],
+    args = [
+        "--module=$(rootpath @softhsm2//:gen_dir)/lib/softhsm/libsofthsm2.so",
+        "--token=fake_keys -u user -p 123456",
+        "slh-dsa",
+        "sign",
+        "--label fake",
+        "--output /tmp/foo",
+        "sw/device/silicon_creator/lib/ownership/keys/fake/app_prod_ecdsa_p256.der",
+    ],
+    data = [
+        ":tqbf_digest",
+        "//signing/softhsm",
+        "//signing/softhsm:conf",
+        "//sw/device/silicon_creator/lib/ownership/keys/fake:ecdsa_keyset",
+        "//sw/host/hsmtool",
+        "@softhsm2//:gen_dir",
+    ],
+    env = {
+        "SOFTHSM2_CONF": "$(rootpath //signing/softhsm:conf)",
+        "FIRST": "opentitantool",
+        "OTTOOL_ARGS": """
+            --rcfile=
+            slh-dsa sign
+                sw/device/silicon_creator/lib/ownership/keys/fake/app_prod_ecdsa_p256.der
+                --input=$(rootpath :tqbf_digest)
+                --output=tqbf.slh_dsa_sig
+        """,
+    },
+)
 
 sh_test(
     name = "token_exists_test",
