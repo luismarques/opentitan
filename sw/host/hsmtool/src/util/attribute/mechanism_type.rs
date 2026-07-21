@@ -609,6 +609,8 @@ pub enum MechanismType {
     EcdsaSha384 = CKM_ECDSA_SHA384,
     #[serde(rename = "CKM_ECDSA_SHA512")]
     EcdsaSha512 = CKM_ECDSA_SHA512,
+    // #[serde(rename = "CKM_SLH_DSA")]
+    // SlhDsa = CKM_SLH_DSA,
     #[serde(rename = "CKM_EC_KEY_PAIR_GEN_W_EXTRA_BITS")]
     EcKeyPairGenWExtraBits = CKM_EC_KEY_PAIR_GEN_W_EXTRA_BITS,
     #[serde(rename = "CKM_ECDH1_DERIVE")]

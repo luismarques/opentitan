@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::path::PathBuf;
 
-use crate::commands::{Dispatch};
+use crate::commands::{Dispatch, SignResult};
 use crate::error::HsmError;
 use crate::module::Module;
 use crate::util::attribute::KeyType;
@@ -45,18 +45,11 @@ impl Dispatch for Sign {
         attrs.push(Attribute::KeyType(KeyType::SlhDsa.try_into()?));
         attrs.push(Attribute::Sign(true));
         let object = helper::find_one_object(session, &attrs)?;
-        todo!("Implement SLH-DSA signing");
-
-        // let data = helper::read_file(&self.input)?;
-        // let data = self.format.prepare(KeyType::Rsa, &data)?;
-        // let mechanism = self.format.mechanism(KeyType::Rsa)?;
-        // let mut result = session.sign(&mechanism, object, &data)?;
-        // if self.little_endian {
-        //     result.reverse();
-        // }
-        // if let Some(output) = &self.output {
-        //     helper::write_file(output, &result)?;
-        // }
+        let data = helper::read_file(&self.input)?;
+        // let data = self.format.prepare(KeyType::SlhDsa, &data)?; // TODO: remember that we haven't yet done domain separation for SLH-DSA, so this is just a plain-text signature for now
+        let mechanism = self.format.mechanism(KeyType::SlhDsa)?;
+        let mut result = session.sign(&mechanism, object, &data)?;
+        helper::write_file(&self.output, &result)?;
         // if let Some(range) = &self.update_in_place {
         //     let mut data = helper::read_file(&self.input)?;
         //     if let Some(slice) = data.get_mut(range.clone()) {
@@ -66,9 +59,9 @@ impl Dispatch for Sign {
         //     }
         //     helper::write_file(&self.input, &data)?;
         // }
-        // Ok(Box::new(SignResult {
-        //     digest: data,
-        //     signature: result,
-        // }))
+        Ok(Box::new(SignResult {
+            digest: data,
+            signature: result,
+        }))
     }
 }

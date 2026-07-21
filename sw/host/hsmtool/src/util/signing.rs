@@ -97,6 +97,20 @@ impl SignData {
                 // Data is a slice of plaintext: hash.
                 SignData::Slice(a, b) => Self::data_plain_text(&input[*a..*b]),
             },
+            KeyType::SlhDsa => match self {
+                // Data is plaintext: hash.
+                SignData::PlainText => Self::data_plain_text(input),
+                // Data is already hashed: no transformation needed.
+                // If the `little_endian` flag is true, we assume the pre-hashed input came
+                // from opentitantool, which writes out the hash in little endian order,
+                // and therefore, needs to be reversed before the signing operation.
+                SignData::Sha256Hash => Self::data_raw(input, false),
+                SignData::Sha256HashReversed => Self::data_raw(input, true),
+                // Raw data requires no transformation.
+                SignData::Raw => Self::data_raw(input, false),
+                // Data is a slice of plaintext: hash.
+                SignData::Slice(a, b) => Self::data_plain_text(&input[*a..*b]),
+            },
             _ => Err(HsmError::Unsupported(format!("SignData prepare for {keytype:?}")).into()),
         }
     }
@@ -154,6 +168,13 @@ impl SignData {
                 SignData::Sha256HashReversed => Ok(Mechanism::Ecdsa),
                 SignData::Raw => Ok(Mechanism::Ecdsa),
                 SignData::Slice(_, _) => Ok(Mechanism::Ecdsa),
+            },
+            KeyType::SlhDsa => match self {
+                SignData::PlainText => Ok(Mechanism::SlhDsa),
+                SignData::Sha256Hash => Ok(Mechanism::SlhDsa),
+                SignData::Sha256HashReversed => Ok(Mechanism::SlhDsa),
+                SignData::Raw => Ok(Mechanism::SlhDsa),
+                SignData::Slice(_, _) => Ok(Mechanism::SlhDsa),
             },
             _ => Err(HsmError::Unsupported(format!("No mechanism for {keytype:?}")).into()),
         }
