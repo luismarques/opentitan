@@ -78,6 +78,7 @@ sh_test(
                 --output=tqbf.slh_dsa_sig
         """,
     },
+    deps = [":test_lib"],
 )
 
 sh_test(
