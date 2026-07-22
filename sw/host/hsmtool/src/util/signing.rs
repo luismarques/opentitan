@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use cryptoki::mechanism::Mechanism;
+use cryptoki::mechanism::dsa::{HashSignAdditionalContext, HedgeType, SignAdditionalContext};
 use rsa::pkcs1v15::Pkcs1v15Sign;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -170,11 +171,16 @@ impl SignData {
                 SignData::Slice(_, _) => Ok(Mechanism::Ecdsa),
             },
             KeyType::SlhDsa => match self {
-                SignData::PlainText => Ok(Mechanism::SlhDsa),
-                SignData::Sha256Hash => Ok(Mechanism::SlhDsa),
-                SignData::Sha256HashReversed => Ok(Mechanism::SlhDsa),
-                SignData::Raw => Ok(Mechanism::SlhDsa),
-                SignData::Slice(_, _) => Ok(Mechanism::SlhDsa),
+                SignData::PlainText |
+                SignData::Sha256Hash |
+                SignData::Sha256HashReversed |
+                SignData::Raw |
+                SignData::Slice(_, _) => {
+                    Ok(Mechanism::SlhDsa(SignAdditionalContext::new(
+                        HedgeType::Preferred,
+                        None,
+                    )))
+                }
             },
             _ => Err(HsmError::Unsupported(format!("No mechanism for {keytype:?}")).into()),
         }

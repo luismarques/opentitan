@@ -70,13 +70,6 @@ sh_test(
     env = {
         "SOFTHSM2_CONF": "$(rootpath //signing/softhsm:conf)",
         "FIRST": "opentitantool",
-        "OTTOOL_ARGS": """
-            --rcfile=
-            slh-dsa sign
-                sw/device/silicon_creator/lib/ownership/keys/fake/app_prod_ecdsa_p256.der
-                --input=$(rootpath :tqbf_digest)
-                --output=tqbf.slh_dsa_sig
-        """,
     },
     deps = [":test_lib"],
 )
