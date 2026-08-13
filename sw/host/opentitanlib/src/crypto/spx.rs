@@ -103,6 +103,27 @@ fn as_pem(data: &[u8]) -> Option<&str> {
     s.trim_start().starts_with("-----BEGIN").then_some(s)
 }
 
+/// Builds the error message for a key that no supported format could decode.
+///
+/// Since the format is discovered by trial and error, a bare "unsupported
+/// format" would hide the reason each attempt failed, which for a PEM file is
+/// usually as specific as "bad public key length" or a mismatched label.
+fn parse_failure(kind: &str, data: &[u8], attempts: &[String]) -> String {
+    let description = match as_pem(data) {
+        // The label alone often identifies the problem, e.g. an ECDSA key that
+        // was passed where an SPX key was expected.
+        Some(pem) => format!("{:?}", pem.lines().next().unwrap_or_default().trim()),
+        None => format!("{} bytes of non-PEM data", data.len()),
+    };
+    let mut message =
+        format!("Failed to parse SPHINCS+/SLH-DSA {kind} key from {description}; tried:");
+    for attempt in attempts {
+        message.push_str("\n  ");
+        message.push_str(attempt);
+    }
+    message
+}
+
 /// Decodes a PKCS#8 (PEM or DER) secret key of the given algorithm.
 fn secret_key_from_pkcs8(algorithm: SphincsPlus, data: &[u8]) -> Result<SpxSecretKey> {
     // `slh_dsa` 0.0.3 does not zeroize its own key material, so this only
@@ -141,19 +162,20 @@ pub fn load_spx_secret_key(path: impl AsRef<Path>) -> Result<SpxSecretKey> {
 /// Load a SPHINCS+/SLH-DSA secret key from a byte slice.
 /// Supports OpenTitan proprietary PEM format, standard PKCS#8 PEM, and standard PKCS#8 DER.
 pub fn load_spx_secret_key_from_bytes(data: &[u8]) -> Result<SpxSecretKey> {
+    let mut attempts = Vec::new();
     if let Some(pem) = as_pem(data) {
-        if let Ok(key) = SpxSecretKey::from_pem(pem) {
-            return Ok(key);
+        match SpxSecretKey::from_pem(pem) {
+            Ok(key) => return Ok(key),
+            Err(e) => attempts.push(format!("proprietary PEM: {e}")),
         }
     }
     for &algorithm in ALGORITHMS {
-        if let Ok(key) = secret_key_from_pkcs8(algorithm, data) {
-            return Ok(key);
+        match secret_key_from_pkcs8(algorithm, data) {
+            Ok(key) => return Ok(key),
+            Err(e) => attempts.push(format!("PKCS#8 {algorithm}: {e}")),
         }
     }
-    bail!(
-        "Failed to parse SPHINCS+/SLH-DSA secret key (supported formats: proprietary PEM, PKCS#8 PEM, PKCS#8 DER)"
-    );
+    bail!("{}", parse_failure("secret", data, &attempts));
 }
 
 /// Load a SPHINCS+/SLH-DSA public key from a file.
@@ -170,25 +192,30 @@ pub fn load_spx_public_key(path: impl AsRef<Path>) -> Result<SpxPublicKey> {
 /// Supports OpenTitan proprietary PEM format, standard PKCS#8 PEM, standard PKCS#8 DER,
 /// and extracting a public key from a secret key in any supported format.
 pub fn load_spx_public_key_from_bytes(data: &[u8]) -> Result<SpxPublicKey> {
-    // This also covers the ASN.1 form emitted by some HSMs, which the
-    // sphincsplus crate recognizes by its HashSLH-DSA OID.
+    let mut attempts = Vec::new();
+    // This also covers the proprietary PEM secret key (which embeds the public
+    // key) and the ASN.1 form emitted by some HSMs, which the sphincsplus crate
+    // recognizes by its HashSLH-DSA OID.
     if let Some(pem) = as_pem(data) {
-        if let Ok(key) = SpxPublicKey::from_pem(pem) {
-            return Ok(key);
+        match SpxPublicKey::from_pem(pem) {
+            Ok(key) => return Ok(key),
+            Err(e) => attempts.push(format!("proprietary PEM: {e}")),
         }
     }
     for &algorithm in ALGORITHMS {
-        if let Ok(key) = public_key_from_spki(algorithm, data) {
-            return Ok(key);
+        match public_key_from_spki(algorithm, data) {
+            Ok(key) => return Ok(key),
+            Err(e) => attempts.push(format!("SubjectPublicKeyInfo {algorithm}: {e}")),
         }
     }
-    // Fallback: try loading as a secret key and converting to public key
-    if let Ok(sk) = load_spx_secret_key_from_bytes(data) {
-        return Ok(SpxPublicKey::from(&sk));
+    // Fallback: a PKCS#8 secret key also carries its public key.
+    for &algorithm in ALGORITHMS {
+        match secret_key_from_pkcs8(algorithm, data) {
+            Ok(sk) => return Ok(SpxPublicKey::from(&sk)),
+            Err(e) => attempts.push(format!("PKCS#8 secret key {algorithm}: {e}")),
+        }
     }
-    bail!(
-        "Failed to parse SPHINCS+/SLH-DSA public key (supported formats: proprietary PEM, PKCS#8 PEM, PKCS#8 DER)"
-    );
+    bail!("{}", parse_failure("public", data, &attempts));
 }
 
 /// Save a SPHINCS+/SLH-DSA secret key to a file in the specified format.
@@ -330,6 +357,24 @@ mod test {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_reject_non_spx_key() {
+        // A key of the wrong algorithm should say so, rather than reporting a
+        // bare "unsupported format".
+        let error = load_spx_public_key_from_bytes(
+            b"-----BEGIN EC PRIVATE KEY-----\nAA==\n-----END EC PRIVATE KEY-----\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("EC PRIVATE KEY"), "{error}");
+        assert!(error.contains("proprietary PEM"), "{error}");
+
+        let error = load_spx_secret_key_from_bytes(&[0u8; 64])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("64 bytes of non-PEM data"), "{error}");
     }
 
     #[test]
