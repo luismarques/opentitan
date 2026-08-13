@@ -369,6 +369,7 @@ rust_library(
         "@crate_index//:thiserror",
         "@crate_index//:typetag",
         "@crate_index//:zerocopy",
+        "@crate_index//:zeroize",
         "@lowrisc_serde_annotate//serde_annotate",
     ],
 )

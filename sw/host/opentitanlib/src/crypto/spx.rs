@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
+// opentitanlib does not depend on `pkcs8`/`spki` directly; use the copies
+// re-exported through `ecdsa` so that all of the key handling in this crate
+// agrees on one version of the `der` crate family.
 use ecdsa::elliptic_curve::pkcs8::{
     DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding,
 };
@@ -11,9 +14,37 @@ use serde_annotate::Annotate;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::str::FromStr;
+use zeroize::Zeroizing;
 
 use super::Error;
 use sphincsplus::{DecodeKey, EncodeKey, SphincsPlus, SpxPublicKey, SpxSecretKey};
+
+/// Every algorithm that can appear in a key file, in the order in which the
+/// loaders try them.  This must list all of the `SphincsPlus` variants; the
+/// `with_slh_dsa_params!` dispatch below will fail to compile if a variant is
+/// added without being handled here as well.
+const ALGORITHMS: &[SphincsPlus] = &[SphincsPlus::Shake128sSimple, SphincsPlus::Sha2128sSimple];
+
+/// Evaluates `$body` with the type name `$params` bound to the `slh_dsa`
+/// parameter set that corresponds to the `SphincsPlus` variant `$algorithm`.
+///
+/// Since this expands to a `match`, every arm has to produce the same type:
+/// `$body` can use the (algorithm dependent) `slh_dsa` key types, but must
+/// convert them to something algorithm independent before yielding them.
+macro_rules! with_slh_dsa_params {
+    ($algorithm:expr, |$params:ident| $body:block) => {
+        match $algorithm {
+            SphincsPlus::Shake128sSimple => {
+                type $params = slh_dsa::Shake128s;
+                $body
+            }
+            SphincsPlus::Sha2128sSimple => {
+                type $params = slh_dsa::Sha2_128s;
+                $body
+            }
+        }
+    };
+}
 
 #[derive(
     Default,
@@ -66,13 +97,42 @@ impl SpxKeyFormat {
     }
 }
 
+/// Returns `data` as a string if it looks like a PEM document.
+fn as_pem(data: &[u8]) -> Option<&str> {
+    let s = std::str::from_utf8(data).ok()?;
+    s.trim_start().starts_with("-----BEGIN").then_some(s)
+}
+
+/// Decodes a PKCS#8 (PEM or DER) secret key of the given algorithm.
+fn secret_key_from_pkcs8(algorithm: SphincsPlus, data: &[u8]) -> Result<SpxSecretKey> {
+    // `slh_dsa` 0.0.3 does not zeroize its own key material, so this only
+    // covers the copy that opentitanlib is responsible for.
+    let key = with_slh_dsa_params!(algorithm, |Params| {
+        let sk = match as_pem(data) {
+            Some(pem) => slh_dsa::SigningKey::<Params>::from_pkcs8_pem(pem),
+            None => slh_dsa::SigningKey::<Params>::from_pkcs8_der(data),
+        }?;
+        Zeroizing::new(sk.to_bytes().to_vec())
+    });
+    SpxSecretKey::from_bytes(algorithm, &key).map_err(|e| anyhow!(e))
+}
+
+/// Decodes a SubjectPublicKeyInfo (PEM or DER) public key of the given algorithm.
+fn public_key_from_spki(algorithm: SphincsPlus, data: &[u8]) -> Result<SpxPublicKey> {
+    let key = with_slh_dsa_params!(algorithm, |Params| {
+        let vk = match as_pem(data) {
+            Some(pem) => slh_dsa::VerifyingKey::<Params>::from_public_key_pem(pem),
+            None => slh_dsa::VerifyingKey::<Params>::from_public_key_der(data),
+        }?;
+        vk.to_bytes().to_vec()
+    });
+    SpxPublicKey::from_bytes(algorithm, &key).map_err(|e| anyhow!(e))
+}
+
 /// Load a SPHINCS+/SLH-DSA secret key from a file.
 /// Supports OpenTitan proprietary PEM format, standard PKCS#8 PEM, and standard PKCS#8 DER.
 pub fn load_spx_secret_key(path: impl AsRef<Path>) -> Result<SpxSecretKey> {
     let path = path.as_ref();
-    if let Ok(key) = SpxSecretKey::read_pem_file(path) {
-        return Ok(key);
-    }
     let data = std::fs::read(path).with_context(|| format!("Failed to read file: {path:?}"))?;
     load_spx_secret_key_from_bytes(&data)
         .with_context(|| format!("Failed to load SPHINCS+/SLH-DSA secret key from {path:?}"))
@@ -81,31 +141,14 @@ pub fn load_spx_secret_key(path: impl AsRef<Path>) -> Result<SpxSecretKey> {
 /// Load a SPHINCS+/SLH-DSA secret key from a byte slice.
 /// Supports OpenTitan proprietary PEM format, standard PKCS#8 PEM, and standard PKCS#8 DER.
 pub fn load_spx_secret_key_from_bytes(data: &[u8]) -> Result<SpxSecretKey> {
-    if let Ok(s) = std::str::from_utf8(data) {
-        if let Ok(key) = SpxSecretKey::from_pem(s) {
+    if let Some(pem) = as_pem(data) {
+        if let Ok(key) = SpxSecretKey::from_pem(pem) {
             return Ok(key);
         }
     }
-    // Try Shake128s PKCS#8 DER / PEM
-    if let Ok(sk) = slh_dsa::SigningKey::<slh_dsa::Shake128s>::from_pkcs8_der(data) {
-        return SpxSecretKey::from_bytes(SphincsPlus::Shake128sSimple, &sk.to_bytes())
-            .map_err(|e| anyhow!(e));
-    }
-    if let Ok(s) = std::str::from_utf8(data) {
-        if let Ok(sk) = slh_dsa::SigningKey::<slh_dsa::Shake128s>::from_pkcs8_pem(s) {
-            return SpxSecretKey::from_bytes(SphincsPlus::Shake128sSimple, &sk.to_bytes())
-                .map_err(|e| anyhow!(e));
-        }
-    }
-    // Try Sha2-128s PKCS#8 DER / PEM
-    if let Ok(sk) = slh_dsa::SigningKey::<slh_dsa::Sha2_128s>::from_pkcs8_der(data) {
-        return SpxSecretKey::from_bytes(SphincsPlus::Sha2128sSimple, &sk.to_bytes())
-            .map_err(|e| anyhow!(e));
-    }
-    if let Ok(s) = std::str::from_utf8(data) {
-        if let Ok(sk) = slh_dsa::SigningKey::<slh_dsa::Sha2_128s>::from_pkcs8_pem(s) {
-            return SpxSecretKey::from_bytes(SphincsPlus::Sha2128sSimple, &sk.to_bytes())
-                .map_err(|e| anyhow!(e));
+    for &algorithm in ALGORITHMS {
+        if let Ok(key) = secret_key_from_pkcs8(algorithm, data) {
+            return Ok(key);
         }
     }
     bail!(
@@ -118,9 +161,6 @@ pub fn load_spx_secret_key_from_bytes(data: &[u8]) -> Result<SpxSecretKey> {
 /// and extracting a public key from a secret key file in any supported format.
 pub fn load_spx_public_key(path: impl AsRef<Path>) -> Result<SpxPublicKey> {
     let path = path.as_ref();
-    if let Ok(key) = SpxPublicKey::read_pem_file(path) {
-        return Ok(key);
-    }
     let data = std::fs::read(path).with_context(|| format!("Failed to read file: {path:?}"))?;
     load_spx_public_key_from_bytes(&data)
         .with_context(|| format!("Failed to load SPHINCS+/SLH-DSA public key from {path:?}"))
@@ -130,31 +170,16 @@ pub fn load_spx_public_key(path: impl AsRef<Path>) -> Result<SpxPublicKey> {
 /// Supports OpenTitan proprietary PEM format, standard PKCS#8 PEM, standard PKCS#8 DER,
 /// and extracting a public key from a secret key in any supported format.
 pub fn load_spx_public_key_from_bytes(data: &[u8]) -> Result<SpxPublicKey> {
-    if let Ok(s) = std::str::from_utf8(data) {
-        if let Ok(key) = SpxPublicKey::from_pem(s) {
+    // This also covers the ASN.1 form emitted by some HSMs, which the
+    // sphincsplus crate recognizes by its HashSLH-DSA OID.
+    if let Some(pem) = as_pem(data) {
+        if let Ok(key) = SpxPublicKey::from_pem(pem) {
             return Ok(key);
         }
     }
-    // Try Shake128s PKCS#8 SPKI DER / PEM
-    if let Ok(vk) = slh_dsa::VerifyingKey::<slh_dsa::Shake128s>::from_public_key_der(data) {
-        return SpxPublicKey::from_bytes(SphincsPlus::Shake128sSimple, &vk.to_bytes())
-            .map_err(|e| anyhow!(e));
-    }
-    if let Ok(s) = std::str::from_utf8(data) {
-        if let Ok(vk) = slh_dsa::VerifyingKey::<slh_dsa::Shake128s>::from_public_key_pem(s) {
-            return SpxPublicKey::from_bytes(SphincsPlus::Shake128sSimple, &vk.to_bytes())
-                .map_err(|e| anyhow!(e));
-        }
-    }
-    // Try Sha2-128s PKCS#8 SPKI DER / PEM
-    if let Ok(vk) = slh_dsa::VerifyingKey::<slh_dsa::Sha2_128s>::from_public_key_der(data) {
-        return SpxPublicKey::from_bytes(SphincsPlus::Sha2128sSimple, &vk.to_bytes())
-            .map_err(|e| anyhow!(e));
-    }
-    if let Ok(s) = std::str::from_utf8(data) {
-        if let Ok(vk) = slh_dsa::VerifyingKey::<slh_dsa::Sha2_128s>::from_public_key_pem(s) {
-            return SpxPublicKey::from_bytes(SphincsPlus::Sha2128sSimple, &vk.to_bytes())
-                .map_err(|e| anyhow!(e));
+    for &algorithm in ALGORITHMS {
+        if let Ok(key) = public_key_from_spki(algorithm, data) {
+            return Ok(key);
         }
     }
     // Fallback: try loading as a secret key and converting to public key
@@ -173,45 +198,21 @@ pub fn save_spx_secret_key(
     format: SpxKeyFormat,
 ) -> Result<()> {
     let path = path.as_ref();
-    match format {
-        SpxKeyFormat::Pem => {
-            key.write_pem_file(path)
-                .with_context(|| format!("Failed to write proprietary PEM to {path:?}"))?;
-        }
-        SpxKeyFormat::Pkcs8Pem | SpxKeyFormat::Pkcs8Der => match key.algorithm() {
-            SphincsPlus::Shake128sSimple => {
-                let sk = slh_dsa::SigningKey::<slh_dsa::Shake128s>::try_from(key.as_bytes())
-                    .map_err(|e| anyhow!("Failed to convert to slh_dsa SigningKey: {:?}", e))?;
-                match format {
-                    SpxKeyFormat::Pkcs8Pem => {
-                        sk.write_pkcs8_pem_file(path, LineEnding::default())
-                            .with_context(|| format!("Failed to write PKCS#8 PEM to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pkcs8Der => {
-                        sk.write_pkcs8_der_file(path)
-                            .with_context(|| format!("Failed to write PKCS#8 DER to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pem => unreachable!(),
-                }
-            }
-            SphincsPlus::Sha2128sSimple => {
-                let sk = slh_dsa::SigningKey::<slh_dsa::Sha2_128s>::try_from(key.as_bytes())
-                    .map_err(|e| anyhow!("Failed to convert to slh_dsa SigningKey: {:?}", e))?;
-                match format {
-                    SpxKeyFormat::Pkcs8Pem => {
-                        sk.write_pkcs8_pem_file(path, LineEnding::default())
-                            .with_context(|| format!("Failed to write PKCS#8 PEM to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pkcs8Der => {
-                        sk.write_pkcs8_der_file(path)
-                            .with_context(|| format!("Failed to write PKCS#8 DER to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pem => unreachable!(),
-                }
-            }
-        },
+    if format == SpxKeyFormat::Pem {
+        return key
+            .write_pem_file(path)
+            .with_context(|| format!("Failed to write proprietary PEM to {path:?}"));
     }
-    Ok(())
+    with_slh_dsa_params!(key.algorithm(), |Params| {
+        let sk = slh_dsa::SigningKey::<Params>::try_from(key.as_bytes())
+            .map_err(|e| anyhow!("Failed to convert to slh_dsa SigningKey: {e:?}"))?;
+        match format {
+            SpxKeyFormat::Pkcs8Pem => sk.write_pkcs8_pem_file(path, LineEnding::default()),
+            SpxKeyFormat::Pkcs8Der => sk.write_pkcs8_der_file(path),
+            SpxKeyFormat::Pem => unreachable!("handled above"),
+        }
+        .with_context(|| format!("Failed to write {format} to {path:?}"))
+    })
 }
 
 /// Save a SPHINCS+/SLH-DSA public key to a file in the specified format.
@@ -221,45 +222,21 @@ pub fn save_spx_public_key(
     format: SpxKeyFormat,
 ) -> Result<()> {
     let path = path.as_ref();
-    match format {
-        SpxKeyFormat::Pem => {
-            key.write_pem_file(path)
-                .with_context(|| format!("Failed to write proprietary PEM to {path:?}"))?;
-        }
-        SpxKeyFormat::Pkcs8Pem | SpxKeyFormat::Pkcs8Der => match key.algorithm() {
-            SphincsPlus::Shake128sSimple => {
-                let vk = slh_dsa::VerifyingKey::<slh_dsa::Shake128s>::try_from(key.as_bytes())
-                    .map_err(|e| anyhow!("Failed to convert to slh_dsa VerifyingKey: {:?}", e))?;
-                match format {
-                    SpxKeyFormat::Pkcs8Pem => {
-                        vk.write_public_key_pem_file(path, LineEnding::default())
-                            .with_context(|| format!("Failed to write PKCS#8 PEM to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pkcs8Der => {
-                        vk.write_public_key_der_file(path)
-                            .with_context(|| format!("Failed to write PKCS#8 DER to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pem => unreachable!(),
-                }
-            }
-            SphincsPlus::Sha2128sSimple => {
-                let vk = slh_dsa::VerifyingKey::<slh_dsa::Sha2_128s>::try_from(key.as_bytes())
-                    .map_err(|e| anyhow!("Failed to convert to slh_dsa VerifyingKey: {:?}", e))?;
-                match format {
-                    SpxKeyFormat::Pkcs8Pem => {
-                        vk.write_public_key_pem_file(path, LineEnding::default())
-                            .with_context(|| format!("Failed to write PKCS#8 PEM to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pkcs8Der => {
-                        vk.write_public_key_der_file(path)
-                            .with_context(|| format!("Failed to write PKCS#8 DER to {path:?}"))?;
-                    }
-                    SpxKeyFormat::Pem => unreachable!(),
-                }
-            }
-        },
+    if format == SpxKeyFormat::Pem {
+        return key
+            .write_pem_file(path)
+            .with_context(|| format!("Failed to write proprietary PEM to {path:?}"));
     }
-    Ok(())
+    with_slh_dsa_params!(key.algorithm(), |Params| {
+        let vk = slh_dsa::VerifyingKey::<Params>::try_from(key.as_bytes())
+            .map_err(|e| anyhow!("Failed to convert to slh_dsa VerifyingKey: {e:?}"))?;
+        match format {
+            SpxKeyFormat::Pkcs8Pem => vk.write_public_key_pem_file(path, LineEnding::default()),
+            SpxKeyFormat::Pkcs8Der => vk.write_public_key_der_file(path),
+            SpxKeyFormat::Pem => unreachable!("handled above"),
+        }
+        .with_context(|| format!("Failed to write {format} to {path:?}"))
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize, Annotate, PartialEq)]
