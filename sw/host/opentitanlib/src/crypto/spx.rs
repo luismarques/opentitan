@@ -329,6 +329,70 @@ mod test {
     use crate::util::tmpfilename;
     use sphincsplus::SpxDomain;
 
+    /// A throwaway SLH-DSA-SHA2-128s key pair in the proprietary OpenTitan PEM
+    /// format, as written by `opentitantool spx key generate --format pem`.
+    const PROPRIETARY_SK_PEM: &str = "-----BEGIN RAW:SLH_DSA_SHA2_128s PRIVATE KEY-----\n\
+        6bjY0UDbmzL4TnTVYwINqOCrxxyGNC8hJXMzKB9WDNfaSaVWNOfNyXSDc9opKeh2\n\
+        dNVIlMTKhAWCYUnLhZ0gsw==\n\
+        -----END RAW:SLH_DSA_SHA2_128s PRIVATE KEY-----\n";
+    const PROPRIETARY_PK_PEM: &str = "-----BEGIN RAW:SLH_DSA_SHA2_128s PUBLIC KEY-----\n\
+        2kmlVjTnzcl0g3PaKSnodnTVSJTEyoQFgmFJy4WdILM=\n\
+        -----END RAW:SLH_DSA_SHA2_128s PUBLIC KEY-----\n";
+    /// The same public key as a SubjectPublicKeyInfo whose AlgorithmIdentifier
+    /// carries the HashSLH-DSA-SHA2-128s-with-SHA256 OID
+    /// (2.16.840.1.101.3.4.3.35), which is what some HSMs hand out.
+    const HSM_SPKI_PEM: &str = "-----BEGIN PUBLIC KEY-----\n\
+        MDAwCwYJYIZIAWUDBAMjAyEA2kmlVjTnzcl0g3PaKSnodnTVSJTEyoQFgmFJy4Wd\n\
+        ILM=\n\
+        -----END PUBLIC KEY-----\n";
+    const PK_HEX: &str = "da49a55634e7cdc9748373da2929e87674d54894c4ca8405826149cb859d20b3";
+
+    #[test]
+    fn test_proprietary_pem_vectors() -> Result<()> {
+        let pk = load_spx_public_key_from_bytes(PROPRIETARY_PK_PEM.as_bytes())?;
+        assert_eq!(pk.algorithm(), SphincsPlus::Sha2128sSimple);
+        assert_eq!(hex::encode(pk.as_bytes()), PK_HEX);
+
+        // A secret key embeds its public key, so either file names the same key.
+        let sk = load_spx_secret_key_from_bytes(PROPRIETARY_SK_PEM.as_bytes())?;
+        assert_eq!(SpxPublicKey::from(&sk), pk);
+        assert_eq!(
+            load_spx_public_key_from_bytes(PROPRIETARY_SK_PEM.as_bytes())?,
+            pk
+        );
+
+        // The keys checked into sw/device/silicon_creator were written before
+        // the algorithm's display name changed and still use the old label.
+        let legacy =
+            |pem: &str| pem.replace("RAW:SLH_DSA_SHA2_128s", "RAW:SPHINCS+_SHA2_128s_simple");
+        assert_eq!(
+            load_spx_public_key_from_bytes(legacy(PROPRIETARY_PK_PEM).as_bytes())?,
+            pk
+        );
+        assert_eq!(
+            load_spx_secret_key_from_bytes(legacy(PROPRIETARY_SK_PEM).as_bytes())?,
+            sk
+        );
+
+        // A public key must not satisfy a request for a secret key.
+        assert!(load_spx_secret_key_from_bytes(PROPRIETARY_PK_PEM.as_bytes()).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_hsm_spki_vector() -> Result<()> {
+        let pk = load_spx_public_key_from_bytes(HSM_SPKI_PEM.as_bytes())?;
+        assert_eq!(pk.algorithm(), SphincsPlus::Sha2128sSimple);
+        assert_eq!(hex::encode(pk.as_bytes()), PK_HEX);
+
+        // The pure SLH-DSA OIDs do not cover this key, so it is the sphincsplus
+        // ASN.1 fallback rather than the slh_dsa decoder that accepts it.
+        assert!(
+            public_key_from_spki(SphincsPlus::Sha2128sSimple, HSM_SPKI_PEM.as_bytes()).is_err()
+        );
+        Ok(())
+    }
+
     #[test]
     fn test_spx_format_roundtrip() -> Result<()> {
         for algorithm in [SphincsPlus::Shake128sSimple, SphincsPlus::Sha2128sSimple] {
