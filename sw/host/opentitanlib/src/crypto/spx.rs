@@ -62,10 +62,10 @@ pub enum SpxKeyFormat {
     #[default]
     #[serde(rename = "pem")]
     Pem,
-    /// Standard PKCS#8 PEM format.
+    /// Standard PEM format: PKCS#8 for private keys, SubjectPublicKeyInfo for public keys.
     #[serde(rename = "pkcs8-pem")]
     Pkcs8Pem,
-    /// Standard PKCS#8 DER format.
+    /// Standard DER format: PKCS#8 for private keys, SubjectPublicKeyInfo for public keys.
     #[serde(rename = "pkcs8-der")]
     Pkcs8Der,
 }

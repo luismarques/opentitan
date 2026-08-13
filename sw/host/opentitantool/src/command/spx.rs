@@ -64,9 +64,18 @@ impl CommandDispatch for SpxKeyShowCommand {
     }
 }
 
-/// Generate a SPHINCS+-SHAKE256-128s-simple public private key pair. The full keypair will be
-/// written to <OUTPUT_DIR>/<BASENAME>.key and the public key will be written to
-/// <OUTPUT_DIR>/<BASENAME>.pub.key.
+/// Describes the key files written by a command.
+#[derive(Annotate, serde::Serialize)]
+pub struct SpxKeyFileInfo {
+    pub algorithm: String,
+    pub format: String,
+    pub private_key: Option<String>,
+    pub public_key: Option<String>,
+}
+
+/// Generate a SPHINCS+ public private key pair. The private key will be written to
+/// <OUTPUT_DIR>/<BASENAME>.<EXT> and the public key will be written to
+/// <OUTPUT_DIR>/<BASENAME>.pub.<EXT>, where <EXT> is determined by --format.
 #[derive(Debug, Args)]
 pub struct SpxKeyGenerateCommand {
     /// SPHINCS+ algorithm (SHAKE-128s-simple, SHA2-128s-simple)
@@ -92,11 +101,63 @@ impl CommandDispatch for SpxKeyGenerateCommand {
         file.push(&self.basename);
         file.set_extension(self.format.ext());
         spx::save_spx_secret_key(&private_key, &file, self.format)?;
+        let private_path = file.clone();
 
         file.set_extension(self.format.pub_ext());
         spx::save_spx_public_key(&public_key, &file, self.format)?;
 
-        Ok(None)
+        Ok(Some(Box::new(SpxKeyFileInfo {
+            algorithm: self.algorithm.to_string(),
+            format: self.format.to_string(),
+            private_key: Some(private_path.to_string_lossy().into_owned()),
+            public_key: Some(file.to_string_lossy().into_owned()),
+        })))
+    }
+}
+
+/// Convert a SPHINCS+ key to a different encoding. The input format is detected automatically.
+#[derive(Debug, Args)]
+pub struct SpxKeyConvertCommand {
+    /// Key encoding format to convert to (pem, pkcs8-pem, pkcs8-der).
+    #[arg(long, default_value_t = SpxKeyFormat::default())]
+    format: SpxKeyFormat,
+    /// Write the public key even when the input file contains a key pair.
+    #[arg(long)]
+    public: bool,
+    /// SPHINCS+ key file to convert (either just the public key or full keypair).
+    input: PathBuf,
+    /// Output key file.
+    output: PathBuf,
+}
+
+impl CommandDispatch for SpxKeyConvertCommand {
+    fn run(
+        &self,
+        _context: &dyn Any,
+        _transport: &TransportWrapper,
+    ) -> Result<Option<Box<dyn erased_serde::Serialize>>> {
+        // A key pair is converted to a key pair unless --public asks otherwise.
+        // The public key loader accepts key pairs too, so the fallback below
+        // covers both a public-key input and `--public`.
+        if !self.public {
+            if let Ok(private_key) = spx::load_spx_secret_key(&self.input) {
+                spx::save_spx_secret_key(&private_key, &self.output, self.format)?;
+                return Ok(Some(Box::new(SpxKeyFileInfo {
+                    algorithm: private_key.algorithm().to_string(),
+                    format: self.format.to_string(),
+                    private_key: Some(self.output.to_string_lossy().into_owned()),
+                    public_key: None,
+                })));
+            }
+        }
+        let public_key = spx::load_spx_public_key(&self.input)?;
+        spx::save_spx_public_key(&public_key, &self.output, self.format)?;
+        Ok(Some(Box::new(SpxKeyFileInfo {
+            algorithm: public_key.algorithm().to_string(),
+            format: self.format.to_string(),
+            private_key: None,
+            public_key: Some(self.output.to_string_lossy().into_owned()),
+        })))
     }
 }
 
@@ -104,6 +165,7 @@ impl CommandDispatch for SpxKeyGenerateCommand {
 pub enum SpxKeySubcommands {
     Show(SpxKeyShowCommand),
     Generate(SpxKeyGenerateCommand),
+    Convert(SpxKeyConvertCommand),
 }
 
 #[derive(serde::Serialize, Annotate)]
