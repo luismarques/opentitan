@@ -371,6 +371,7 @@ dependencies = [
  "pem-rfc7468",
  "pest",
  "pest_derive",
+ "pkcs8",
  "proc-macro2",
  "quote",
  "rand 0.8.5",

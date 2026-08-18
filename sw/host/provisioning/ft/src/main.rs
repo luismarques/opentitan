@@ -11,9 +11,9 @@ use arrayvec::ArrayVec;
 use base64ct::{Base64, Encoding};
 use clap::{Args, Parser};
 use elliptic_curve::SecretKey;
-use elliptic_curve::pkcs8::DecodePrivateKey;
 use indexmap::IndexMap;
 use p256::NistP256;
+use pkcs8::DecodePrivateKey;
 
 use cert_lib::{CaConfig, CaKey, CaKeyType};
 use ft_lib::{
