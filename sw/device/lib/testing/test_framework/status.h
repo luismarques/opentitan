@@ -22,6 +22,9 @@ typedef enum test_status {
    *
    * Writing this value to #kDeviceTestStatusAddress must not stop simulation of
    * the current device.
+   *
+   * Unlike the other non-terminal statuses, this one is not logged, since it is
+   * set before the console has been brought up. See #test_status_set.
    */
   kTestStatusInBootRom = 0xb090,  // 'bogo', BOotrom GO
 

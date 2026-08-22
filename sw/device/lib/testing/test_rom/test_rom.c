@@ -250,12 +250,17 @@ bool rom_test_main(void) {
 }
 
 void _boot_start(void) {
-  // Bring the console up first: until this returns, neither `test_status_set()`
-  // nor a failing `CHECK*()` can report anything on non-DV targets. Note that
-  // `rom_test_main` is weak, so this covers test-provided overrides too.
+  // Signal that the CPU has reached the boot ROM as early as possible, so that
+  // the DV testbench does not have to wait for the console. This status is
+  // deliberately not logged, so it does not need one.
+  test_status_set(kTestStatusInBootRom);
+
+  // Bring the console up before anything that might have to report: until this
+  // returns, neither `test_status_set()` nor a failing `CHECK*()` can be seen
+  // on non-DV targets. Note that `rom_test_main` is weak, so this covers
+  // test-provided overrides too.
   test_rom_console_init();
 
-  test_status_set(kTestStatusInBootRom);
   test_status_set(rom_test_main() ? kTestStatusPassed : kTestStatusFailed);
 
   abort();

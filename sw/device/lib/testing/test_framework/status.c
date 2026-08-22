@@ -36,6 +36,15 @@ void test_status_set(test_status_t test_status) {
       abort();
       break;
     }
+    case kTestStatusInBootRom: {
+      // Deliberately not logged. The test ROM's `_boot_start` sets this before
+      // bringing up the console, so that the status reaches the DV testbench as
+      // early as possible. On targets that report over the UART there is
+      // nowhere for the message to go at that point, so it would only be
+      // discarded into `base_dev_null`.
+      test_status_device_write(test_status);
+      break;
+    }
     default: {
       LOG_INFO("test_status_set to 0x%x", test_status);
       test_status_device_write(test_status);
