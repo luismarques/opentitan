@@ -68,6 +68,45 @@ static inline uintptr_t rom_ext_vma_get(const manifest_t *manifest,
           (uintptr_t)_rom_ext_virtual_start_address);
 }
 
+/**
+ * Bring up the console, so that logging and test status reporting work.
+ *
+ * Nothing printed before this returns is observable on targets that report over
+ * the UART, i.e. everything except DV, which bypasses it (see
+ * `kDeviceLogBypassUartAddress`). It must therefore run before the first
+ * `test_status_set()` or `CHECK*()`.
+ *
+ * Note that the pinmux configuration is what routes UART0 TX to a pad, so it
+ * cannot be deferred: without it the UART initializes successfully but nothing
+ * reaches the wire. Failures within this function are consequently impossible
+ * to report, so keep it minimal.
+ */
+static void test_rom_console_init(void) {
+  CHECK_DIF_OK(dif_pinmux_init(
+      mmio_region_from_addr(TOP_EARLGREY_PINMUX_AON_BASE_ADDR), &pinmux));
+  pinmux_testutils_init(&pinmux);
+
+  if (kDeviceType == kDeviceSimDV) {
+    return;
+  }
+
+  CHECK_DIF_OK(dif_uart_init(
+      mmio_region_from_addr(TOP_EARLGREY_UART0_BASE_ADDR), &uart0));
+  CHECK(kUartBaudrate <= UINT32_MAX, "kUartBaudrate must fit in uint32_t");
+  CHECK(kClockFreqPeripheralHz <= UINT32_MAX,
+        "kClockFreqPeripheralHz must fit in uint32_t");
+  CHECK_DIF_OK(dif_uart_configure(
+      &uart0, (dif_uart_config_t){
+                  .baudrate = (uint32_t)kUartBaudrate,
+                  .clk_freq_hz = (uint32_t)kClockFreqPeripheralHz,
+                  .parity_enable = kDifToggleDisabled,
+                  .parity = kDifUartParityEven,
+                  .tx_enable = kDifToggleEnabled,
+                  .rx_enable = kDifToggleEnabled,
+              }));
+  base_uart_stdout(&uart0);
+}
+
 // `test_in_rom = True` tests can override this symbol to provide their own
 // rom tests. By default, it simply jumps into the OTTF's flash.
 OT_WEAK
@@ -99,11 +138,6 @@ bool rom_test_main(void) {
   // Initial sec_mmio, required by bootstrap and its dependencies.
   sec_mmio_init();
 
-  // Configure the pinmux.
-  CHECK_DIF_OK(dif_pinmux_init(
-      mmio_region_from_addr(TOP_EARLGREY_PINMUX_AON_BASE_ADDR), &pinmux));
-  pinmux_testutils_init(&pinmux);
-
   CHECK_DIF_OK(dif_rstmgr_init(
       mmio_region_from_addr(TOP_EARLGREY_RSTMGR_AON_BASE_ADDR), &rstmgr));
 
@@ -134,25 +168,6 @@ bool rom_test_main(void) {
 #endif
   CHECK_DIF_OK(
       dif_flash_ctrl_set_flash_enablement(&flash_ctrl, kDifToggleEnabled));
-
-  // Setup the UART for printing messages to the console.
-  if (kDeviceType != kDeviceSimDV) {
-    CHECK_DIF_OK(dif_uart_init(
-        mmio_region_from_addr(TOP_EARLGREY_UART0_BASE_ADDR), &uart0));
-    CHECK(kUartBaudrate <= UINT32_MAX, "kUartBaudrate must fit in uint32_t");
-    CHECK(kClockFreqPeripheralHz <= UINT32_MAX,
-          "kClockFreqPeripheralHz must fit in uint32_t");
-    CHECK_DIF_OK(dif_uart_configure(
-        &uart0, (dif_uart_config_t){
-                    .baudrate = (uint32_t)kUartBaudrate,
-                    .clk_freq_hz = (uint32_t)kClockFreqPeripheralHz,
-                    .parity_enable = kDifToggleDisabled,
-                    .parity = kDifUartParityEven,
-                    .tx_enable = kDifToggleEnabled,
-                    .rx_enable = kDifToggleEnabled,
-                }));
-    base_uart_stdout(&uart0);
-  }
 
   // Print the chip version information
   LOG_INFO("kBuildInfo: scm_revision=%x", kBuildInfo.scm_revision);
@@ -235,6 +250,11 @@ bool rom_test_main(void) {
 }
 
 void _boot_start(void) {
+  // Bring the console up first: until this returns, neither `test_status_set()`
+  // nor a failing `CHECK*()` can report anything on non-DV targets. Note that
+  // `rom_test_main` is weak, so this covers test-provided overrides too.
+  test_rom_console_init();
+
   test_status_set(kTestStatusInBootRom);
   test_status_set(rom_test_main() ? kTestStatusPassed : kTestStatusFailed);
 
