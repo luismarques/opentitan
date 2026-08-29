@@ -52,6 +52,11 @@ struct Opts {
     /// Internal, used to tell the child process to run as a daemon.
     #[arg(long)]
     child: bool,
+
+    /// Path to the OpenOCD binary to use when a client requests a JTAG connection.  Overrides
+    /// whatever path the client asked for, which generally refers to the client's filesystem.
+    #[arg(long)]
+    openocd: Option<PathBuf>,
 }
 
 // Given some existing option configuration, maybe re-evaluate command
@@ -206,7 +211,7 @@ fn main() -> Result<()> {
     let transport = backend::create(&opts.backend_opts)?;
 
     // Bind to TCP socket, in preparation for servicing requests from network.
-    let mut session = SessionHandler::init(transport, opts.listen_port)?;
+    let mut session = SessionHandler::init(transport, opts.listen_port, opts.openocd)?;
 
     if opts.foreground {
         // Request a SIGTERM if our parent dies.

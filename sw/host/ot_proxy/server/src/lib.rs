@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use tokio::net::TcpListener;
@@ -30,7 +31,11 @@ pub struct SessionHandler {
 }
 
 impl SessionHandler {
-    pub fn init(transport: TransportWrapper, listen_port: Option<u16>) -> Result<Self> {
+    pub fn init(
+        transport: TransportWrapper,
+        listen_port: Option<u16>,
+        openocd: Option<PathBuf>,
+    ) -> Result<Self> {
         let mut port = listen_port.unwrap_or(9900);
         let limit = listen_port.unwrap_or(9999);
         // Find a suitable port to bind to.
@@ -43,7 +48,7 @@ impl SessionHandler {
             }
         };
         let socket_server =
-            JsonSocketServer::new(TransportCommandHandler::new(transport)?, socket)?;
+            JsonSocketServer::new(TransportCommandHandler::new(transport, openocd)?, socket)?;
         Ok(Self {
             port,
             socket_server,

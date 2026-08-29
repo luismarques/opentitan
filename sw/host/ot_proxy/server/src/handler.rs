@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -14,6 +15,7 @@ use std::time::Duration;
 
 use opentitanlib::app::{NoProgressBar, TransportWrapper};
 use opentitanlib::bootstrap::Bootstrap;
+use opentitanlib::debug::openocd::OpenOcd;
 use opentitanlib::io::console::broadcast::WeakBroadcaster;
 use opentitanlib::io::console::{Broadcaster, ConsoleDevice};
 use opentitanlib::io::gpio::{
@@ -27,9 +29,9 @@ use ot_proxy_proto::{
     BitbangEntryRequest, BitbangEntryResponse, DacBangEntryRequest, EmuRequest, EmuResponse,
     FgpaResponse, FpgaRequest, GpioBitRequest, GpioBitResponse, GpioDacRequest, GpioDacResponse,
     GpioMonRequest, GpioMonResponse, GpioRequest, GpioResponse, I2cRequest, I2cResponse,
-    I2cTransferRequest, I2cTransferResponse, Message, ProxyRequest, ProxyResponse, Request,
-    Response, SpiRequest, SpiResponse, SpiTransferRequest, SpiTransferResponse, UartRequest,
-    UartResponse,
+    I2cTransferRequest, I2cTransferResponse, JtagRequest, JtagResponse, Message, ProxyRequest,
+    ProxyResponse, Request, Response, SpiRequest, SpiResponse, SpiTransferRequest,
+    SpiTransferResponse, UartRequest, UartResponse,
 };
 
 use super::{CommandHandler, Connection};
@@ -44,16 +46,23 @@ pub struct TransportCommandHandler {
     spi_chip_select: HashMap<String, Vec<spi::AssertChipSelect>>,
     ongoing_bitbanging: Option<Box<dyn GpioBitbangOperation<'static, 'static>>>,
     ongoing_dacbanging: Option<Box<dyn GpioDacBangOperation>>,
+    /// OpenOCD server spawned on behalf of a client, driven by forwarded TCL commands.
+    openocd: Option<OpenOcd>,
+    /// Overrides the OpenOCD binary path requested by the client.  The binary is a resource of
+    /// the machine the debugger is attached to, so the client's own path is rarely meaningful.
+    openocd_path: Option<PathBuf>,
 }
 
 impl TransportCommandHandler {
-    pub fn new(transport: TransportWrapper) -> Result<Self> {
+    pub fn new(transport: TransportWrapper, openocd_path: Option<PathBuf>) -> Result<Self> {
         Ok(Self {
             transport,
+            openocd_path,
             uarts: Default::default(),
             spi_chip_select: HashMap::new(),
             ongoing_bitbanging: None,
             ongoing_dacbanging: None,
+            openocd: None,
         })
     }
 
@@ -589,6 +598,33 @@ impl TransportCommandHandler {
                     }
                 }
             }
+            Request::Jtag(request) => match request {
+                JtagRequest::Connect { params } => {
+                    let mut params = params.clone();
+                    if let Some(openocd) = &self.openocd_path {
+                        params.openocd = openocd.clone();
+                    }
+                    // `into_raw()` detaches the OpenOCD server from the borrow of the
+                    // transport, so that it can outlive this request and be driven by
+                    // subsequent `Execute` requests.
+                    self.openocd = Some(self.transport.jtag(&params)?.into_raw()?);
+                    Ok(Response::Jtag(JtagResponse::Connect))
+                }
+                JtagRequest::Execute { cmd } => {
+                    let Some(openocd) = self.openocd.as_mut() else {
+                        bail!("no JTAG connection has been established")
+                    };
+                    Ok(Response::Jtag(JtagResponse::Execute {
+                        response: openocd.execute(cmd)?,
+                    }))
+                }
+                JtagRequest::Shutdown => {
+                    if let Some(openocd) = self.openocd.take() {
+                        openocd.shutdown()?;
+                    }
+                    Ok(Response::Jtag(JtagResponse::Shutdown))
+                }
+            },
             Request::Fpga(request) => match request {
                 FpgaRequest::LoadBitstream { bitstream } => {
                     self.transport

@@ -23,10 +23,12 @@ use tokio::task::AbortHandle;
 use opentitanlib::backend::{Backend, BackendOpts, define_interface};
 use opentitanlib::bootstrap::BootstrapOptions;
 use opentitanlib::impl_serializable_error;
+use opentitanlib::debug::openocd::{OpenOcd, OpenOcdExecutor, OpenOcdJtagChain};
 use opentitanlib::io::console::Buffered;
 use opentitanlib::io::emu::Emulator;
 use opentitanlib::io::gpio::{GpioBitbanging, GpioMonitoring, GpioPin};
 use opentitanlib::io::i2c::Bus;
+use opentitanlib::io::jtag::{JtagChain, JtagParams};
 use opentitanlib::io::spi::Target;
 use opentitanlib::io::uart::Uart;
 use opentitanlib::transport::{
@@ -34,8 +36,8 @@ use opentitanlib::transport::{
 };
 use opentitanlib::util::serializable_error::SerializedError;
 use ot_proxy_proto::{
-    FgpaResponse, FpgaRequest, Message, ProxyRequest, ProxyResponse, Request, Response,
-    UartRequest, UartResponse,
+    FgpaResponse, FpgaRequest, JtagRequest, JtagResponse, Message, ProxyRequest, ProxyResponse,
+    Request, Response, UartRequest, UartResponse,
 };
 
 mod emu;
@@ -291,6 +293,39 @@ impl ProxyOps for Proxy {
     }
 }
 
+/// Drives the OpenOCD server which the session spawned next to the debugger, by forwarding
+/// each TCL command over the proxy protocol.
+struct ProxyOpenOcd {
+    inner: Rc<Inner>,
+}
+
+impl ProxyOpenOcd {
+    fn execute_jtag_command(&self, command: JtagRequest) -> Result<JtagResponse> {
+        match self.inner.execute_command(Request::Jtag(command))? {
+            Response::Jtag(resp) => Ok(resp),
+            _ => bail!(ProxyError::UnexpectedReply()),
+        }
+    }
+}
+
+impl OpenOcdExecutor for ProxyOpenOcd {
+    fn execute(&mut self, cmd: &str) -> Result<String> {
+        match self.execute_jtag_command(JtagRequest::Execute {
+            cmd: cmd.to_string(),
+        })? {
+            JtagResponse::Execute { response } => Ok(response),
+            _ => bail!(ProxyError::UnexpectedReply()),
+        }
+    }
+
+    fn shutdown(&mut self) -> Result<()> {
+        match self.execute_jtag_command(JtagRequest::Shutdown)? {
+            JtagResponse::Shutdown => Ok(()),
+            _ => bail!(ProxyError::UnexpectedReply()),
+        }
+    }
+}
+
 impl Transport for Proxy {
     fn capabilities(&self) -> Result<Capabilities> {
         match self.inner.execute_command(Request::GetCapabilities)? {
@@ -343,6 +378,24 @@ impl Transport for Proxy {
             .borrow_mut()
             .insert(instance_name.to_owned(), instance.clone());
         Ok(instance)
+    }
+
+    // Ask the session to spawn an OpenOCD server against its own debugger, and return a chain
+    // which drives that server remotely.  The session has already run the adapter and
+    // `scan_chain` setup as part of `Connect`, so use `from_raw` rather than re-running it.
+    fn jtag(&self, opts: &JtagParams) -> Result<Box<dyn JtagChain + '_>> {
+        let openocd = ProxyOpenOcd {
+            inner: self.inner.clone(),
+        };
+        match openocd.execute_jtag_command(JtagRequest::Connect {
+            params: opts.clone(),
+        })? {
+            JtagResponse::Connect => (),
+            _ => bail!(ProxyError::UnexpectedReply()),
+        }
+        Ok(Box::new(OpenOcdJtagChain::from_raw(
+            OpenOcd::from_executor(Box::new(openocd)),
+        )))
     }
 
     // Create GpioPin instance, or return one from a cache of previously created instances.
