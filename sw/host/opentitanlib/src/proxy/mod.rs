@@ -12,6 +12,7 @@ use protocol::Message;
 use socket_server::{Connection, JsonSocketServer};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use crate::app::TransportWrapper;
 
@@ -61,7 +62,11 @@ pub struct SessionHandler<'a> {
 }
 
 impl<'a> SessionHandler<'a> {
-    pub fn init(transport: &'a TransportWrapper, listen_port: Option<u16>) -> Result<Self> {
+    pub fn init(
+        transport: &'a TransportWrapper,
+        listen_port: Option<u16>,
+        openocd: Option<PathBuf>,
+    ) -> Result<Self> {
         let mut port = listen_port.unwrap_or(9900);
         let limit = listen_port.unwrap_or(9999);
         // Find a suitable port to bind to.
@@ -74,7 +79,7 @@ impl<'a> SessionHandler<'a> {
             }
         };
         let socket_server = JsonSocketServer::new(
-            TransportCommandHandler::new(transport)?,
+            TransportCommandHandler::new(transport, openocd)?,
             NonblockingUartRegistry::new(),
             socket,
         )?;

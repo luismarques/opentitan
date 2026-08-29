@@ -7,6 +7,7 @@ use anyhow::{Result, bail};
 use mio::{Registry, Token};
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -16,11 +17,13 @@ use super::protocol::{
     BitbangEntryRequest, BitbangEntryResponse, DacBangEntryRequest, EmuRequest, EmuResponse,
     GpioBitRequest, GpioBitResponse, GpioDacRequest, GpioDacResponse, GpioMonRequest,
     GpioMonResponse, GpioRequest, GpioResponse, I2cRequest, I2cResponse, I2cTransferRequest,
-    I2cTransferResponse, Message, ProxyRequest, ProxyResponse, Request, Response, SpiRequest,
-    SpiResponse, SpiTransferRequest, SpiTransferResponse, UartRequest, UartResponse,
+    I2cTransferResponse, JtagRequest, JtagResponse, Message, ProxyRequest, ProxyResponse, Request,
+    Response, SpiRequest, SpiResponse, SpiTransferRequest, SpiTransferResponse, UartRequest,
+    UartResponse,
 };
 use crate::app::TransportWrapper;
 use crate::bootstrap::Bootstrap;
+use crate::debug::openocd::OpenOcd;
 use crate::io::gpio::{
     BitbangEntry, DacBangEntry, GpioBitbangOperation, GpioDacBangOperation, GpioPin,
 };
@@ -36,10 +39,15 @@ pub struct TransportCommandHandler<'a> {
     spi_chip_select: HashMap<String, Vec<spi::AssertChipSelect>>,
     ongoing_bitbanging: Option<Box<dyn GpioBitbangOperation<'static, 'static>>>,
     ongoing_dacbanging: Option<Box<dyn GpioDacBangOperation>>,
+    /// OpenOCD server spawned on behalf of a client, driven by forwarded TCL commands.
+    openocd: Option<OpenOcd>,
+    /// Overrides the OpenOCD binary path requested by the client.  The binary is a resource of
+    /// the machine the debugger is attached to, so the client's own path is rarely meaningful.
+    openocd_path: Option<PathBuf>,
 }
 
 impl<'a> TransportCommandHandler<'a> {
-    pub fn new(transport: &'a TransportWrapper) -> Result<Self> {
+    pub fn new(transport: &'a TransportWrapper, openocd_path: Option<PathBuf>) -> Result<Self> {
         let nonblocking_help = transport.nonblocking_help()?;
         Ok(Self {
             transport,
@@ -47,6 +55,8 @@ impl<'a> TransportCommandHandler<'a> {
             spi_chip_select: HashMap::new(),
             ongoing_bitbanging: None,
             ongoing_dacbanging: None,
+            openocd: None,
+            openocd_path,
         })
     }
 
@@ -528,6 +538,33 @@ impl<'a> TransportCommandHandler<'a> {
                     }
                 }
             }
+            Request::Jtag(request) => match request {
+                JtagRequest::Connect { params } => {
+                    let mut params = params.clone();
+                    if let Some(openocd) = &self.openocd_path {
+                        params.openocd = openocd.clone();
+                    }
+                    // `into_raw()` detaches the OpenOCD server from the borrow of the
+                    // transport, so that it can outlive this request and be driven by
+                    // subsequent `Execute` requests.
+                    self.openocd = Some(self.transport.jtag(&params)?.into_raw()?);
+                    Ok(Response::Jtag(JtagResponse::Connect))
+                }
+                JtagRequest::Execute { cmd } => {
+                    let Some(openocd) = self.openocd.as_mut() else {
+                        bail!("no JTAG connection has been established")
+                    };
+                    Ok(Response::Jtag(JtagResponse::Execute {
+                        response: openocd.execute(cmd)?,
+                    }))
+                }
+                JtagRequest::Shutdown => {
+                    if let Some(openocd) = self.openocd.take() {
+                        openocd.shutdown()?;
+                    }
+                    Ok(Response::Jtag(JtagResponse::Shutdown))
+                }
+            },
             Request::Proxy(command) => match command {
                 ProxyRequest::Provides => {
                     let provides_map = self.transport.provides_map()?.clone();

@@ -23,19 +23,48 @@ use crate::io::jtag::{Jtag, JtagChain, JtagError, JtagParams, JtagTap, RiscvReg}
 use crate::util::parse_int::ParseInt;
 use crate::util::printer;
 
+/// A means of driving an OpenOCD server which is not a child of this process, by forwarding
+/// TCL commands to whoever owns it.  Used by the `proxy` transport to run OpenOCD on the
+/// machine that the debugger is physically attached to.
+pub trait OpenOcdExecutor {
+    /// Send a TCL command to the remote OpenOCD server and wait for its response.
+    fn execute(&mut self, cmd: &str) -> Result<String>;
+    /// Ask the owner of the remote OpenOCD server to shut it down.
+    fn shutdown(&mut self) -> Result<()>;
+}
+
+enum OpenOcdInner {
+    /// An OpenOCD child process of this process, with a direct socket to its TCL interface.
+    Local {
+        /// OpenOCD child process.
+        server_process: Child,
+        /// Receiving side of the stream to the telnet interface of OpenOCD.
+        reader: BufReader<TcpStream>,
+        /// Sending side of the stream to the telnet interface of OpenOCD.
+        writer: TcpStream,
+    },
+    /// An OpenOCD server owned by some other process, driven indirectly.
+    Remote(Box<dyn OpenOcdExecutor>),
+}
+
 /// Represents an OpenOCD server that we can interact with.
 pub struct OpenOcd {
-    /// OpenOCD child process.
-    server_process: Child,
-    /// Receiving side of the stream to the telnet interface of OpenOCD.
-    reader: BufReader<TcpStream>,
-    /// Sending side of the stream to the telnet interface of OpenOCD.
-    writer: TcpStream,
+    inner: OpenOcdInner,
 }
 
 impl Drop for OpenOcd {
     fn drop(&mut self) {
-        let _ = self.server_process.kill();
+        match &mut self.inner {
+            OpenOcdInner::Local { server_process, .. } => {
+                let _ = server_process.kill();
+            }
+            // Mirror the local behaviour of killing the server on drop.  This matters because
+            // the server holds the debugger's USB interface open, which would otherwise
+            // conflict with subsequent non-JTAG operations on the same transport.
+            OpenOcdInner::Remote(executor) => {
+                let _ = executor.shutdown();
+            }
+        }
     }
 }
 
@@ -163,9 +192,11 @@ impl OpenOcd {
             .context("failed to disable TCP socket delay")?;
 
         let mut connection = Self {
-            server_process: scopeguard::ScopeGuard::into_inner(kill_guard),
-            reader: BufReader::new(stream.try_clone()?),
-            writer: stream,
+            inner: OpenOcdInner::Local {
+                server_process: scopeguard::ScopeGuard::into_inner(kill_guard),
+                reader: BufReader::new(stream.try_clone()?),
+                writer: stream,
+            },
         };
 
         // Test the connection by asking for OpenOCD's version.
@@ -175,8 +206,16 @@ impl OpenOcd {
         Ok(connection)
     }
 
+    /// Wrap an OpenOCD server owned by another process, which is driven by forwarding TCL
+    /// commands through the given executor rather than over a local socket.
+    pub fn from_executor(executor: Box<dyn OpenOcdExecutor>) -> Self {
+        Self {
+            inner: OpenOcdInner::Remote(executor),
+        }
+    }
+
     /// Send a string to OpenOCD Tcl interface.
-    fn send(&mut self, cmd: &str) -> Result<()> {
+    fn send(writer: &mut TcpStream, cmd: &str) -> Result<()> {
         // The protocol is to send the command followed by a `0x1a` byte,
         // see https://openocd.org/doc/html/Tcl-Scripting-API.html#Tcl-RPC-server
 
@@ -185,19 +224,19 @@ impl OpenOcd {
             bail!("TCL command string should be contained inside the text to send");
         }
 
-        self.writer
+        writer
             .write_all(cmd.as_bytes())
             .context("failed to send a command to OpenOCD server")?;
-        self.writer
+        writer
             .write_all(&[0x1a])
             .context("failed to send the command terminator to OpenOCD server")?;
-        self.writer.flush().context("failed to flush stream")?;
+        writer.flush().context("failed to flush stream")?;
         Ok(())
     }
 
-    fn recv(&mut self) -> Result<String> {
+    fn recv(reader: &mut BufReader<TcpStream>) -> Result<String> {
         let mut buf = Vec::new();
-        self.reader.read_until(0x1A, &mut buf)?;
+        reader.read_until(0x1A, &mut buf)?;
         if !buf.ends_with(b"\x1A") {
             bail!(OpenOcdError::PrematureExit);
         }
@@ -206,18 +245,32 @@ impl OpenOcd {
     }
 
     pub fn shutdown(mut self) -> Result<()> {
-        self.execute("shutdown")?;
-        // Wait for it to exit.
-        self.server_process
-            .wait()
-            .context("failed to wait for OpenOCD server to exit")?;
-        Ok(())
+        match &mut self.inner {
+            OpenOcdInner::Local { .. } => {
+                self.execute("shutdown")?;
+                let OpenOcdInner::Local { server_process, .. } = &mut self.inner else {
+                    unreachable!()
+                };
+                // Wait for it to exit.
+                server_process
+                    .wait()
+                    .context("failed to wait for OpenOCD server to exit")?;
+                Ok(())
+            }
+            // The remote end owns the process, so it is responsible for reaping it.
+            OpenOcdInner::Remote(executor) => executor.shutdown(),
+        }
     }
 
     /// Send a TCL command to OpenOCD and wait for its response.
     pub fn execute(&mut self, cmd: &str) -> Result<String> {
-        self.send(cmd)?;
-        self.recv()
+        match &mut self.inner {
+            OpenOcdInner::Local { reader, writer, .. } => {
+                Self::send(writer, cmd)?;
+                Self::recv(reader)
+            }
+            OpenOcdInner::Remote(executor) => executor.execute(cmd),
+        }
     }
 
     /// Load instruction register of a given tap.
@@ -270,6 +323,12 @@ impl OpenOcdJtagChain {
         openocd.execute("scan_chain")?;
 
         Ok(OpenOcdJtagChain { openocd })
+    }
+
+    /// Wrap an OpenOCD server on which the chain setup commands (adapter selection, speed,
+    /// `transport select` and `scan_chain`) have already been performed.
+    pub fn from_raw(openocd: OpenOcd) -> OpenOcdJtagChain {
+        OpenOcdJtagChain { openocd }
     }
 }
 

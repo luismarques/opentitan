@@ -52,6 +52,11 @@ struct Opts {
     /// Internal, used to tell the child process to run as a daemon.
     #[arg(long)]
     child: bool,
+
+    /// Path to the OpenOCD binary to use when a client requests a JTAG connection.  Overrides
+    /// whatever path the client asked for, which generally refers to the client's filesystem.
+    #[arg(long)]
+    openocd: Option<PathBuf>,
 }
 
 // Given some existing option configuration, maybe re-evaluate command
@@ -145,9 +150,13 @@ fn start_session(run_file_fn: impl FnOnce(u16) -> PathBuf) -> Result<Box<dyn Ser
 // socket, then report the chosen port number to the parent process by means of a serialized
 // `SessionStartResult` sent through the stdout anonymous pipe, and finally enter an infnite
 // loop, processing connections on that socket
-fn session_child(listen_port: Option<u16>, backend_opts: &backend::BackendOpts) -> Result<()> {
+fn session_child(
+    listen_port: Option<u16>,
+    backend_opts: &backend::BackendOpts,
+    openocd: Option<PathBuf>,
+) -> Result<()> {
     let transport = backend::create(backend_opts)?;
-    let mut session = SessionHandler::init(&transport, listen_port)?;
+    let mut session = SessionHandler::init(&transport, listen_port, openocd)?;
     // Instantiation of Transport backend, and binding to a socket was successful, now go
     // through the process of making this process a daemon, disconnected from the
     // terminal that was used to start it.
@@ -227,7 +236,7 @@ fn main() -> Result<()> {
         rustix::process::set_parent_process_death_signal(Some(Signal::Term))?;
 
         let transport = backend::create(&opts.backend_opts)?;
-        let mut session = SessionHandler::init(&transport, opts.listen_port)?;
+        let mut session = SessionHandler::init(&transport, opts.listen_port, opts.openocd)?;
         println!("Listening on port {}", session.get_port());
         session.run_loop()?;
         return Ok(());
@@ -235,7 +244,7 @@ fn main() -> Result<()> {
 
     if opts.child {
         // This process is a child, which is supposed to stay running as a daemon.
-        match session_child(opts.listen_port, &opts.backend_opts) {
+        match session_child(opts.listen_port, &opts.backend_opts, opts.openocd) {
             Ok(()) => process::exit(0),
             Err(e) => {
                 // Report any error to parent process though stdout pipe.

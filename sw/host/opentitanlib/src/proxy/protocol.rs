@@ -11,6 +11,7 @@ use crate::io::gpio::{
     ClockNature, MonitoringReadResponse, MonitoringStartResponse, PinMode, PullMode,
 };
 use crate::io::i2c::DeviceStatus;
+use crate::io::jtag::JtagParams;
 use crate::io::spi::{MaxSizes, TransferMode};
 use crate::io::uart::Parity;
 use crate::proxy::errors::SerializedError;
@@ -45,6 +46,7 @@ pub enum Request {
     Spi { id: String, command: SpiRequest },
     I2c { id: String, command: I2cRequest },
     Emu { command: EmuRequest },
+    Jtag(JtagRequest),
     Proxy(ProxyRequest),
 }
 
@@ -60,7 +62,29 @@ pub enum Response {
     Spi(SpiResponse),
     I2c(I2cResponse),
     Emu(EmuResponse),
+    Jtag(JtagResponse),
     Proxy(ProxyResponse),
+}
+
+/// JTAG is not proxied operation-by-operation.  Instead, the session spawns an OpenOCD server
+/// next to the debugger, and the client drives it by forwarding TCL commands.  Every JTAG
+/// operation in `opentitanlib` is expressed in terms of `OpenOcd::execute()`, so this single
+/// request is sufficient to support the whole `Jtag` trait as well as the raw-OpenOCD users.
+#[derive(Serialize, Deserialize)]
+pub enum JtagRequest {
+    /// Spawn an OpenOCD server on the session host and perform the JTAG chain setup.
+    Connect { params: JtagParams },
+    /// Run a TCL command on the session's OpenOCD server.
+    Execute { cmd: String },
+    /// Shut the session's OpenOCD server down.
+    Shutdown,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum JtagResponse {
+    Connect,
+    Execute { response: String },
+    Shutdown,
 }
 
 #[derive(Serialize, Deserialize)]
