@@ -30,7 +30,12 @@ pub mod verilator;
 #[derive(Debug, Args)]
 pub struct BackendOpts {
     /// Name of the debug interface.
-    #[arg(long, default_value = "")]
+    ///
+    /// Self-overriding, so that a later occurrence wins.  Execution environments bake an
+    /// `--interface` into the generated test script, and this allows a test to be redirected at
+    /// a different transport (notably `proxy`) by appending to its argument list, e.g. with
+    /// `bazel test --test_arg=--interface=proxy`.
+    #[arg(long, default_value = "", overrides_with = "interface")]
     pub interface: String,
 
     /// Whether to disable DFT with a strapping config during reset. Only required in TestUnlocked*

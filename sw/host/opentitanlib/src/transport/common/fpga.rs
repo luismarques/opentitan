@@ -51,14 +51,17 @@ impl FpgaProgram<'_> {
     }
 
     pub fn should_skip(&self, transport: &TransportWrapper) -> Result<bool> {
-        // Open the console UART.  We do this first so we get the receiver
-        // started and the uart buffering data for us.
-        let uart = transport.uart("CONSOLE")?;
-        let reset_pin = transport.gpio_pin("RESET")?;
+        // Checked before touching the transport at all, so that `--define bitstream=skip`
+        // works against transports which have no CONSOLE uart or RESET pin to offer, such as
+        // an emulator behind the proxy.
         if self.skip() {
             log::info!("Skip loading the __skip__ bitstream.");
             return Ok(true);
         }
+        // Open the console UART.  We do this first so we get the receiver
+        // started and the uart buffering data for us.
+        let uart = transport.uart("CONSOLE")?;
+        let reset_pin = transport.gpio_pin("RESET")?;
         if self.check_correct_version(&*uart, &*reset_pin)? {
             return Ok(true);
         }
