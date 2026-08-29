@@ -275,6 +275,10 @@ impl<'a> TransportCommandHandler<'a> {
                         instance.set_parity(*parity)?;
                         Ok(Response::Uart(UartResponse::SetParity))
                     }
+                    UartRequest::SetFlowControl(flow_control) => {
+                        instance.set_flow_control(*flow_control)?;
+                        Ok(Response::Uart(UartResponse::SetFlowControl))
+                    }
                     UartRequest::GetDevicePath => {
                         let path = instance.get_device_path()?;
                         Ok(Response::Uart(UartResponse::GetDevicePath { path }))

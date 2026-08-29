@@ -94,6 +94,16 @@ impl Uart for ProxyUart {
         }
     }
 
+    /// Enables software flow control for `write`s.  Both the reads which observe XOFF/XON and
+    /// the writes which honour them happen on the session side, so forwarding the setting is
+    /// all that is needed for flow control to work as it would locally.
+    fn set_flow_control(&self, flow_control: bool) -> Result<()> {
+        match self.execute_command(UartRequest::SetFlowControl(flow_control))? {
+            UartResponse::SetFlowControl => Ok(()),
+            _ => bail!(ProxyError::UnexpectedReply()),
+        }
+    }
+
     fn get_device_path(&self) -> Result<String> {
         match self.execute_command(UartRequest::GetDevicePath)? {
             UartResponse::GetDevicePath { path } => Ok(path),
