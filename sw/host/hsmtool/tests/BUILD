@@ -193,16 +193,59 @@ _SPX_TESTS = {
     },
 }
 
-# SPHINCS+-Sign a digest with opentitantool and then verify the signature with hsmtool.
+# The two backends hsmtool can sign SPHINCS+/SLH-DSA with, each paired with the
+# opentitantool-side file holding the same key in the encoding that backend
+# uses.  Both keys are the same key material (see the `spx key convert`
+# invocations in the commit that created the SLH-DSA files), so a signature made
+# on either side must verify on the other.
+#
+# `spx` keeps the key in a CKO_DATA object and signs in software with the
+# SPHINCS+ reference implementation, which is the same code opentitantool uses.
+# Those tests therefore exercise the plumbing around the signature -- digest
+# selection, domain separation and the hash reversal quirk -- rather than the
+# signature algorithm itself.
+#
+# `slh-dsa` uses native PKCS#11 CKK_SLH_DSA objects, so the token signs with
+# SoftHSM's OpenSSL-backed SLH-DSA.  Those tests are the cross-implementation
+# check: reference SPHINCS+ against OpenSSL, in both directions.  They are also
+# the only coverage of CKM_HASH_SLH_DSA, which the prehashed domains select.
+_SPX_BACKENDS = {
+    "spx": {
+        "command": "spx",
+        "label": "fake_app_prod_spx",
+        "key": "app_prod_spx.pem",
+        "keyset": "//sw/device/silicon_creator/lib/ownership/keys/fake:spx_keyset",
+        # `hsmtool spx verify` takes <INPUT> <SIGNATURE>.
+        "verify_args": "$(rootpath :tqbf_digest)\n                    tqbf.spx_sig",
+    },
+    "slh_dsa": {
+        "command": "slh-dsa",
+        "label": "fake_app_prod_slh_dsa",
+        "key": "app_prod_slh_dsa.pem",
+        "keyset": "//sw/device/silicon_creator/lib/ownership/keys/fake:slh_dsa_keyset",
+        # `hsmtool slh-dsa verify` takes <SIGNATURE> <INPUT>, the opposite order
+        # from every other hsmtool verify subcommand.
+        "verify_args": "tqbf.spx_sig\n                    $(rootpath :tqbf_digest)",
+    },
+}
+
+# The pre-hashed domains select CKM_HASH_SLH_DSA, which the vendored SoftHSM
+# does not implement yet, so both the sign and the verify side of those
+# combinations fail with CKR_MECHANISM_INVALID.  The `_BROKEN_ON_SLH_DSA` tags
+# below keep those four targets defined and runnable against a patched SoftHSM
+# while excluding them from CI, rather than dropping the coverage entirely.
+_BROKEN_ON_SLH_DSA = {"PreHashedSha256": ["broken"], "Pure": []}
+
+# Sign a digest with opentitantool and then verify the signature with hsmtool.
 [
     sh_test(
-        name = "spx_{}_opentitantool_sign_hsmtool_verify_test".format(name),
+        name = "{}_{}_opentitantool_sign_hsmtool_verify_test".format(backend_name, name),
         srcs = ["ot_hsm_runner.sh"],
         data = [
             ":tqbf_digest",
             "//signing/softhsm",
             "//signing/softhsm:conf",
-            "//sw/device/silicon_creator/lib/ownership/keys/fake:spx_keyset",
+            backend["keyset"],
             "//sw/host/hsmtool",
             "//sw/host/opentitantool",
             "@softhsm2//:gen_dir",
@@ -215,42 +258,47 @@ _SPX_TESTS = {
                 spx sign {rev_flag}
                     --domain={domain}
                     $(rootpath :tqbf_digest)
-                    sw/device/silicon_creator/lib/ownership/keys/fake/app_prod_spx.pem
+                    sw/device/silicon_creator/lib/ownership/keys/fake/{key}
                     --output=tqbf.spx_sig
             """.format(
                 domain = param["domain"],
+                key = backend["key"],
                 rev_flag = param["rev_flag"],
             ),
             "HSMTOOL_MODULE": "$(rootpath @softhsm2//:gen_dir)/lib/softhsm/libsofthsm2.so",
             "HSMTOOL_SPX_MODULE": "pkcs11-ef",
             "HSMTOOL_ARGS": """
                 -t fake_keys -u user -p 123456
-                spx verify
-                    --label=fake_app_prod_spx
+                {command} verify
+                    --label={label}
                     --domain={domain}
                     --format={fmt}
-                    $(rootpath :tqbf_digest)
-                    tqbf.spx_sig
+                    {verify_args}
             """.format(
+                command = backend["command"],
                 domain = param["domain"],
                 fmt = param["format"],
+                label = backend["label"],
+                verify_args = backend["verify_args"],
             ),
         },
+        tags = _BROKEN_ON_SLH_DSA[param["domain"]] if backend_name == "slh_dsa" else [],
         deps = [":test_lib"],
     )
     for name, param in _SPX_TESTS.items()
+    for backend_name, backend in _SPX_BACKENDS.items()
 ]
 
-# SPHINCS+-Sign a digest with hsmtool and then verify the signature with opentitantool.
+# Sign a digest with hsmtool and then verify the signature with opentitantool.
 [
     sh_test(
-        name = "spx_{}_hsmtool_sign_opentitantool_verify_test".format(name),
+        name = "{}_{}_hsmtool_sign_opentitantool_verify_test".format(backend_name, name),
         srcs = ["ot_hsm_runner.sh"],
         data = [
             ":tqbf_digest",
             "//signing/softhsm",
             "//signing/softhsm:conf",
-            "//sw/device/silicon_creator/lib/ownership/keys/fake:spx_keyset",
+            backend["keyset"],
             "//sw/host/hsmtool",
             "//sw/host/opentitantool",
             "@softhsm2//:gen_dir",
@@ -262,31 +310,36 @@ _SPX_TESTS = {
                 --rcfile=
                 spx verify {rev_flag}
                     --domain={domain}
-                    sw/device/silicon_creator/lib/ownership/keys/fake/app_prod_spx.pem
+                    sw/device/silicon_creator/lib/ownership/keys/fake/{key}
                     $(rootpath :tqbf_digest)
                     tqbf.spx_sig
             """.format(
                 domain = param["domain"],
+                key = backend["key"],
                 rev_flag = param["rev_flag"],
             ),
             "HSMTOOL_MODULE": "$(rootpath @softhsm2//:gen_dir)/lib/softhsm/libsofthsm2.so",
             "HSMTOOL_SPX_MODULE": "pkcs11-ef",
             "HSMTOOL_ARGS": """
                 -t fake_keys -u user -p 123456
-                spx sign
-                    --label=fake_app_prod_spx
+                {command} sign
+                    --label={label}
                     --domain={domain}
                     --format={fmt}
                     --output=tqbf.spx_sig
                     $(rootpath :tqbf_digest)
             """.format(
+                command = backend["command"],
                 domain = param["domain"],
                 fmt = param["format"],
+                label = backend["label"],
             ),
         },
+        tags = _BROKEN_ON_SLH_DSA[param["domain"]] if backend_name == "slh_dsa" else [],
         deps = [":test_lib"],
     )
     for name, param in _SPX_TESTS.items()
+    for backend_name, backend in _SPX_BACKENDS.items()
 ]
 
 filegroup(
@@ -402,6 +455,90 @@ sh_test(
                 --format=slice:384..1024
                 --update-in-place=0..64
                 image.signed_bin
+        """,
+    },
+    deps = [":test_lib"],
+)
+
+# The tests above hold the key encoding fixed per backend, so each one only
+# proves that a file and the token object derived from it agree.  Nothing in
+# them would notice if app_prod_slh_dsa.pem stopped being app_prod_spx.pem
+# re-encoded, because the RAW file pairs with the CKO_DATA object and the
+# PKCS#8 file pairs with the CKK_SLH_DSA object, and the two pairs never meet.
+#
+# These two deliberately cross the encoding instead: the proprietary RAW file
+# on the opentitantool side against the native SLH-DSA token object, in both
+# directions.  They are the only check that the two encodings name one key.
+# One domain is enough; the domain axis is swept above.
+sh_test(
+    name = "spx_raw_key_slh_dsa_token_opentitantool_sign_hsmtool_verify_test",
+    srcs = ["ot_hsm_runner.sh"],
+    data = [
+        ":tqbf_digest",
+        "//signing/softhsm",
+        "//signing/softhsm:conf",
+        "//sw/device/silicon_creator/lib/ownership/keys/fake:spx_keyset",
+        "//sw/host/hsmtool",
+        "//sw/host/opentitantool",
+        "@softhsm2//:gen_dir",
+    ],
+    env = {
+        "SOFTHSM2_CONF": "$(rootpath //signing/softhsm:conf)",
+        "FIRST": "opentitantool",
+        "OTTOOL_ARGS": """
+            --rcfile=
+            spx sign --spx-hash-reversal-bug=false
+                --domain=Pure
+                $(rootpath :tqbf_digest)
+                sw/device/silicon_creator/lib/ownership/keys/fake/app_prod_spx.pem
+                --output=tqbf.spx_sig
+        """,
+        "HSMTOOL_MODULE": "$(rootpath @softhsm2//:gen_dir)/lib/softhsm/libsofthsm2.so",
+        "HSMTOOL_ARGS": """
+            -t fake_keys -u user -p 123456
+            slh-dsa verify
+                --label=fake_app_prod_slh_dsa
+                --domain=Pure
+                --format=plain-text
+                tqbf.spx_sig
+                $(rootpath :tqbf_digest)
+        """,
+    },
+    deps = [":test_lib"],
+)
+
+sh_test(
+    name = "spx_raw_key_slh_dsa_token_hsmtool_sign_opentitantool_verify_test",
+    srcs = ["ot_hsm_runner.sh"],
+    data = [
+        ":tqbf_digest",
+        "//signing/softhsm",
+        "//signing/softhsm:conf",
+        "//sw/device/silicon_creator/lib/ownership/keys/fake:spx_keyset",
+        "//sw/host/hsmtool",
+        "//sw/host/opentitantool",
+        "@softhsm2//:gen_dir",
+    ],
+    env = {
+        "SOFTHSM2_CONF": "$(rootpath //signing/softhsm:conf)",
+        "FIRST": "hsmtool",
+        "OTTOOL_ARGS": """
+            --rcfile=
+            spx verify --spx-hash-reversal-bug=false
+                --domain=Pure
+                sw/device/silicon_creator/lib/ownership/keys/fake/app_prod_spx.pem
+                $(rootpath :tqbf_digest)
+                tqbf.spx_sig
+        """,
+        "HSMTOOL_MODULE": "$(rootpath @softhsm2//:gen_dir)/lib/softhsm/libsofthsm2.so",
+        "HSMTOOL_ARGS": """
+            -t fake_keys -u user -p 123456
+            slh-dsa sign
+                --label=fake_app_prod_slh_dsa
+                --domain=Pure
+                --format=plain-text
+                --output=tqbf.spx_sig
+                $(rootpath :tqbf_digest)
         """,
     },
     deps = [":test_lib"],
