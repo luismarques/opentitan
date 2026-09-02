@@ -157,13 +157,27 @@ keyset(
     tool = "//signing/tokens:local",
 )
 
+# The signing configuration of each application key, keyed by the basename of
+# the key file.  The `*_spx.pem` and `*_slh_dsa.pem` files hold the same key
+# material in the proprietary RAW and the PKCS#8 encoding respectively, so both
+# keysets below are built from this one map: the domain is a property of the
+# key, not of the encoding it is stored in.
+#
+# The domain has to agree with the key algorithm the owner block declares for
+# the key (`kOwnershipKeyAlgSpxPrehash` versus plain SPX), because it selects
+# both the domain separation prefix the ROM_EXT expects and, in
+# `//rules:signing.bzl`, whether the digest or the full message is handed to the
+# signer.  `app_dev_0` is deliberately the pre-hashed key and `app_prod_0` the
+# pure one so that the verified_boot e2e tests cover both domains.
+_APP_KEYS = {
+    "app_prod": "app_prod_0",
+    "app_dev": "app_dev_0:domain=PreHashedSha256",
+}
+
 keyset(
     name = "spx_keyset",
     build_setting_default = "",
-    keys = {
-        "app_prod_spx.pem": "app_prod_0",
-        "app_dev_spx.pem": "app_dev_0:domain=PreHashedSha256",
-    },
+    keys = {"{}_spx.pem".format(key): config for key, config in _APP_KEYS.items()},
     profile = "local",
     tool = "//signing/tokens:local",
 )
@@ -171,10 +185,7 @@ keyset(
 keyset(
     name = "slh_dsa_keyset",
     build_setting_default = "",
-    keys = {
-        "app_prod_slh_dsa.pem": "app_prod_0",
-        "app_dev_slh_dsa.pem": "app_dev_0",
-    },
+    keys = {"{}_slh_dsa.pem".format(key): config for key, config in _APP_KEYS.items()},
     profile = "local",
     tool = "//signing/tokens:local",
 )
