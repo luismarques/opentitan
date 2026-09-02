@@ -1,0 +1,417 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lowRISC contributors <opentitan@lowrisc.org>
+Date: Tue, 18 Aug 2026 00:00:00 +0100
+Subject: Implement HashSLH-DSA (CKM_HASH_SLH_DSA)
+
+Patch 0002 mirrors https://github.com/softhsm/SoftHSMv2/pull/862, which
+implements the pure SLH-DSA mechanism (CKM_SLH_DSA) only.  OpenTitan also
+signs in the pre-hashed domain, which PKCS#11 v3.2 exposes as
+CKM_HASH_SLH_DSA: the caller passes a digest plus the mechanism that
+produced it, and the token applies the HashSLH-DSA message encoding from
+FIPS 205 section 10.2:
+
+    M' = 01 || |ctx| || ctx || OID(hash) || PH_M
+
+OpenSSL will not build that encoding for us -- EVP only offers the pure
+encoding -- but it does accept a pre-encoded M' when the signature
+parameter "message-encoding" is set to 0 (raw).  So the encoding is built
+in OSSLSLHDSA and handed to OpenSSL as a raw message.
+
+This is not upstream; it should be offered to PR 862 (or as a follow-up
+to it) rather than carried here indefinitely.
+
+diff --git a/src/lib/crypto/OSSLSLHDSA.cpp b/src/lib/crypto/OSSLSLHDSA.cpp
+--- a/src/lib/crypto/OSSLSLHDSA.cpp
++++ b/src/lib/crypto/OSSLSLHDSA.cpp
+@@ -27,6 +27,49 @@
+ #include <openssl/err.h>
+ #include <string.h>
+ 
++namespace
++{
++	// OpenSSL's message encoding modes, see OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING.
++	// RAW signs the supplied M' verbatim, PURE builds M' = 00 || |ctx| || ctx || M.
++	const int OSSL_SLH_DSA_MESSAGE_ENCODE_RAW = 0;
++
++	/** \brief Build the HashSLH-DSA message encoding of FIPS 205 section 10.2:
++	 *         M' = 01 || |ctx| || ctx || OID || PH_M */
++	bool encodeHashSlhDsaMessage(const SLHDSAMechanismParam* param, const ByteString& digest, ByteString& encoded)
++	{
++		const ByteString& context = param->additionalContext;
++
++		if (context.size() > 255)
++		{
++			ERROR_MSG("Invalid parameters, context length > 255");
++			return false;
++		}
++		if (param->hashDigestLen != 0 && digest.size() != param->hashDigestLen)
++		{
++			ERROR_MSG("SLH-DSA: pre-hashed message is %zu bytes, expected %zu",
++				  digest.size(), param->hashDigestLen);
++			return false;
++		}
++
++		encoded.resize(2 + context.size() + param->hashOid.size() + digest.size());
++		unsigned char* p = &encoded[0];
++		*p++ = 0x01;
++		*p++ = (unsigned char)context.size();
++		if (context.size() > 0)
++		{
++			memcpy(p, context.const_byte_str(), context.size());
++			p += context.size();
++		}
++		memcpy(p, param->hashOid.const_byte_str(), param->hashOid.size());
++		p += param->hashOid.size();
++		if (digest.size() > 0)
++		{
++			memcpy(p, digest.const_byte_str(), digest.size());
++		}
++
++		return true;
++	}
++}
+ 
+ // Signing functions
+ /** \brief sign */
+@@ -75,16 +118,30 @@
+ 	// Perform the signature operation
+ 	size_t len = 0;
+ 
+-	OSSL_PARAM params[4], *p = params;
++	OSSL_PARAM params[5], *p = params;
+ 
+ 	int local_deterministic = 1;
+ 	int local_random = 0;
++	int local_encode_raw = OSSL_SLH_DSA_MESSAGE_ENCODE_RAW;
+ 	const SLHDSAMechanismParam* slhdsaSignatureParam = dynamic_cast<const SLHDSAMechanismParam*>(mechanismParam);
+ 	ByteString context;
++	// For HashSLH-DSA the message encoding is built here rather than by
++	// OpenSSL, so |message| points at the M' handed to EVP_PKEY_sign below.
++	ByteString encodedMessage;
++	const ByteString* message = &dataToSign;
+ 	if (slhdsaSignatureParam != NULL)
+ 	{
+ 		Hedge::Type type = slhdsaSignatureParam->hedgeType;
+-		if (slhdsaSignatureParam->additionalContext.size() > 0)
++		if (slhdsaSignatureParam->hashOid.size() > 0)
++		{
++			if (!encodeHashSlhDsaMessage(slhdsaSignatureParam, dataToSign, encodedMessage))
++			{
++				return false;
++			}
++			message = &encodedMessage;
++			*p++ = OSSL_PARAM_construct_int(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING, &local_encode_raw);
++		}
++		else if (slhdsaSignatureParam->additionalContext.size() > 0)
+ 		{
+ 			context = slhdsaSignatureParam->additionalContext;
+ 			size_t contextSize = context.size();
+@@ -148,7 +205,7 @@
+ 		return false;
+ 	}
+ 	/* Calculate the required size for the signature by passing a NULL buffer. */
+-	if (EVP_PKEY_sign(sctx, NULL, &len, dataToSign.const_byte_str(), dataToSign.size()) <= 0)
++	if (EVP_PKEY_sign(sctx, NULL, &len, message->const_byte_str(), message->size()) <= 0)
+ 	{
+ 		ERROR_MSG("SLH-DSA sign size query failed (0x%08lX)", ERR_get_error());
+ 		EVP_SIGNATURE_free(sig_alg);
+@@ -156,7 +213,7 @@
+ 		return false;
+ 	}
+ 	signature.resize(len);
+-	if (EVP_PKEY_sign(sctx, &signature[0], &len, dataToSign.const_byte_str(), dataToSign.size()) <= 0)
++	if (EVP_PKEY_sign(sctx, &signature[0], &len, message->const_byte_str(), message->size()) <= 0)
+ 	{
+ 		ERROR_MSG("SLH-DSA sign failed (0x%08lX)", ERR_get_error());
+ 		EVP_SIGNATURE_free(sig_alg);
+@@ -298,11 +355,24 @@
+ 	}
+ 
+ 	OSSL_PARAM params[3], *p = params;
++	int local_encode_raw = OSSL_SLH_DSA_MESSAGE_ENCODE_RAW;
+ 	const SLHDSAMechanismParam* slhdsaSignatureParam = dynamic_cast<const SLHDSAMechanismParam*>(mechanismParam);
+ 	ByteString context;
++	// See the corresponding comment in sign().
++	ByteString encodedMessage;
++	const ByteString* message = &originalData;
+ 	if (slhdsaSignatureParam != NULL)
+ 	{
+-		if (slhdsaSignatureParam->additionalContext.size() > 0)
++		if (slhdsaSignatureParam->hashOid.size() > 0)
++		{
++			if (!encodeHashSlhDsaMessage(slhdsaSignatureParam, originalData, encodedMessage))
++			{
++				return false;
++			}
++			message = &encodedMessage;
++			*p++ = OSSL_PARAM_construct_int(OSSL_SIGNATURE_PARAM_MESSAGE_ENCODING, &local_encode_raw);
++		}
++		else if (slhdsaSignatureParam->additionalContext.size() > 0)
+ 		{
+ 			context = slhdsaSignatureParam->additionalContext;
+ 			size_t contextSize = context.size();
+@@ -362,7 +432,7 @@
+ 		return false;
+ 	}
+ 	int verifyRV = EVP_PKEY_verify(vctx, signature.const_byte_str(), signature.size(),
+-	                               originalData.const_byte_str(), originalData.size());
++	                               message->const_byte_str(), message->size());
+ 	EVP_PKEY_CTX_free(vctx);
+ 	EVP_SIGNATURE_free(sig_alg);
+ 	if (verifyRV != 1)
+diff --git a/src/lib/crypto/SLHDSAMechanismParam.cpp b/src/lib/crypto/SLHDSAMechanismParam.cpp
+--- a/src/lib/crypto/SLHDSAMechanismParam.cpp
++++ b/src/lib/crypto/SLHDSAMechanismParam.cpp
+@@ -20,12 +20,14 @@
+ SLHDSAMechanismParam::SLHDSAMechanismParam()
+ {
+ 	this->hedgeType = Hedge::HEDGE_PREFERRED;
++	this->hashDigestLen = 0;
+ }
+ 
+ /** \brief SLHDSAMechanismParam */
+ SLHDSAMechanismParam::SLHDSAMechanismParam(Hedge::Type hedgeType)
+ {
+ 	this->hedgeType = hedgeType;
++	this->hashDigestLen = 0;
+ }
+ 
+ /** \brief SLHDSAMechanismParam */
+@@ -33,6 +35,16 @@
+ {
+ 	this->hedgeType = hedgeType;
+ 	this->additionalContext = additionalContext;
++	this->hashDigestLen = 0;
++}
++
++/** \brief SLHDSAMechanismParam */
++SLHDSAMechanismParam::SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& additionalContext, const ByteString& hashOid, size_t hashDigestLen)
++{
++	this->hedgeType = hedgeType;
++	this->additionalContext = additionalContext;
++	this->hashOid = hashOid;
++	this->hashDigestLen = hashDigestLen;
+ }
+ 
+ // Set the type
+diff --git a/src/lib/crypto/SLHDSAMechanismParam.h b/src/lib/crypto/SLHDSAMechanismParam.h
+--- a/src/lib/crypto/SLHDSAMechanismParam.h
++++ b/src/lib/crypto/SLHDSAMechanismParam.h
+@@ -27,6 +27,14 @@
+ 	Hedge::Type hedgeType;
+ 	/** \brief Additional Context */
+ 	ByteString additionalContext;
++	/** \brief The DER encoded OID of the hash used to pre-hash the message.
++	 *
++	 * Empty for the pure variant (CKM_SLH_DSA).  When non-empty the message
++	 * is treated as a digest and the HashSLH-DSA message encoding of
++	 * FIPS 205 section 10.2 is used (CKM_HASH_SLH_DSA). */
++	ByteString hashOid;
++	/** \brief The digest length expected for |hashOid|, in bytes */
++	size_t hashDigestLen;
+ 
+ 	/** \brief The type */
+ 	static const char* type;
+@@ -40,6 +48,9 @@
+ 	/** \brief Constructor with Hedge Type and Additional Context */
+ 	SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& additionalContext);
+ 
++	/** \brief Constructor with Hedge Type, Additional Context and pre-hash OID */
++	SLHDSAMechanismParam(Hedge::Type hedgeType, const ByteString& additionalContext, const ByteString& hashOid, size_t hashDigestLen);
++
+ 	/** \brief Clone */
+ 	virtual SLHDSAMechanismParam* clone() const override;
+ 
+diff --git a/src/lib/crypto/SLHDSAUtil.cpp b/src/lib/crypto/SLHDSAUtil.cpp
+--- a/src/lib/crypto/SLHDSAUtil.cpp
++++ b/src/lib/crypto/SLHDSAUtil.cpp
+@@ -13,6 +13,7 @@
+ #ifdef WITH_SLH_DSA
+ #include "SLHDSAUtil.h"
+ #include "SLHDSAMechanismParam.h"
++#include <cstring>
+ 
+ /** \brief getSLHDSAPrivateKey */
+ /*static*/ CK_RV SLHDSAUtil::getSLHDSAPrivateKey(SLHDSAPrivateKey* privateKey, Token* token, OSObject* key)
+@@ -201,4 +202,52 @@
+ 	return CKR_OK;
+ }
+ 
++/** \brief setHashOid */
++/*static*/ CK_RV SLHDSAUtil::setHashOid(CK_MECHANISM_TYPE inHash, ByteString* outOid, size_t* outDigestLen)
++{
++	if (outOid == NULL || outDigestLen == NULL)
++	{
++		ERROR_MSG("Invalid parameters, outOid or outDigestLen is NULL");
++		return CKR_ARGUMENTS_BAD;
++	}
++
++	// All of the hashes permitted by FIPS 205 section 10.2 live under the NIST
++	// hashAlgs arc 2.16.840.1.101.3.4.2, so only the final arc differs.
++	unsigned char lastArc;
++	size_t digestLen;
++
++	switch (inHash)
++	{
++	case CKM_SHA256:
++		lastArc = 0x01; digestLen = 32; break;
++	case CKM_SHA384:
++		lastArc = 0x02; digestLen = 48; break;
++	case CKM_SHA512:
++		lastArc = 0x03; digestLen = 64; break;
++	case CKM_SHA224:
++		lastArc = 0x04; digestLen = 28; break;
++	case CKM_SHA3_224:
++		lastArc = 0x07; digestLen = 28; break;
++	case CKM_SHA3_256:
++		lastArc = 0x08; digestLen = 32; break;
++	case CKM_SHA3_384:
++		lastArc = 0x09; digestLen = 48; break;
++	case CKM_SHA3_512:
++		lastArc = 0x0A; digestLen = 64; break;
++	// FIPS 205 also permits SHAKE128/256 as pre-hashes, but PKCS#11 v3.2
++	// defines no digest mechanism for them (only key derivation), so there is
++	// nothing for the caller to name them with here.
++	default:
++		ERROR_MSG("SLH-DSA: Invalid parameters, unsupported pre-hash mechanism (0x%08lX)", (unsigned long)inHash);
++		return CKR_MECHANISM_PARAM_INVALID;
++	}
++
++	const unsigned char oid[] = { 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, lastArc };
++	outOid->resize(sizeof(oid));
++	memcpy(&(*outOid)[0], oid, sizeof(oid));
++	*outDigestLen = digestLen;
++
++	return CKR_OK;
++}
++
+ #endif
+diff --git a/src/lib/crypto/SLHDSAUtil.h b/src/lib/crypto/SLHDSAUtil.h
+--- a/src/lib/crypto/SLHDSAUtil.h
++++ b/src/lib/crypto/SLHDSAUtil.h
+@@ -40,6 +40,10 @@
+ 	/** \brief Set the hedge type */
+ 	static CK_RV setHedge(CK_HEDGE_TYPE inHedgeType, Hedge::Type* outHedgeType);
+ 
++	/** \brief Map a hash mechanism onto the DER encoded OID and digest length
++	 *         that HashSLH-DSA (FIPS 205 section 10.2) requires for it */
++	static CK_RV setHashOid(CK_MECHANISM_TYPE inHash, ByteString* outOid, size_t* outDigestLen);
++
+ };
+ 
+ #endif // WITH_SLH_DSA
+diff --git a/src/lib/SoftHSM.cpp b/src/lib/SoftHSM.cpp
+--- a/src/lib/SoftHSM.cpp
++++ b/src/lib/SoftHSM.cpp
+@@ -888,6 +888,7 @@
+ #ifdef WITH_SLH_DSA
+ 	t["CKM_SLH_DSA_KEY_PAIR_GEN"] = CKM_SLH_DSA_KEY_PAIR_GEN;
+ 	t["CKM_SLH_DSA"]		= CKM_SLH_DSA;
++	t["CKM_HASH_SLH_DSA"]		= CKM_HASH_SLH_DSA;
+ #endif
+ #ifdef WITH_ML_KEM
+ 	t["CKM_ML_KEM_KEY_PAIR_GEN"] = CKM_ML_KEM_KEY_PAIR_GEN;
+@@ -1450,6 +1451,11 @@
+ 			pInfo->ulMaxKeySize = slhdsaMaxSize;
+ 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+ 			break;
++		case CKM_HASH_SLH_DSA:
++			pInfo->ulMinKeySize = slhdsaMinSize;
++			pInfo->ulMaxKeySize = slhdsaMaxSize;
++			pInfo->flags = CKF_SIGN | CKF_VERIFY;
++			break;
+ #endif
+ #ifdef WITH_ML_KEM
+ 		case CKM_ML_KEM_KEY_PAIR_GEN:
+@@ -4701,6 +4707,45 @@
+ 				mechanismParam = &slhdsaParam;
+ 			}
+ 			break;
++		case CKM_HASH_SLH_DSA:
++		{
++			// The pre-hashed variant of SLH-DSA (HashSLH-DSA, FIPS 205 section
++			// 10.2).  The caller supplies a digest along with the mechanism that
++			// produced it; the message encoding is built by the crypto backend.
++			mechanism = AsymMech::SLHDSA;
++			bAllowMultiPartOp = true;
++			isSLHDSA = true;
++			if (pMechanism->pParameter == NULL_PTR ||
++			    pMechanism->ulParameterLen != sizeof(CK_HASH_SIGN_ADDITIONAL_CONTEXT))
++			{
++				ERROR_MSG("Invalid parameters");
++				return CKR_ARGUMENTS_BAD;
++			}
++			CK_HASH_SIGN_ADDITIONAL_CONTEXT* ckHashSignAdditionalContext = (CK_HASH_SIGN_ADDITIONAL_CONTEXT*) pMechanism->pParameter;
++			CK_RV rv = SLHDSAUtil::setHedge(ckHashSignAdditionalContext->hedgeVariant, &slhdsaParam.hedgeType);
++			if (rv != CKR_OK) {
++				ERROR_MSG("Invalid parameters");
++				return CKR_ARGUMENTS_BAD;
++			}
++			rv = SLHDSAUtil::setHashOid(ckHashSignAdditionalContext->hash, &slhdsaParam.hashOid, &slhdsaParam.hashDigestLen);
++			if (rv != CKR_OK) {
++				return rv;
++			}
++			if (ckHashSignAdditionalContext->ulContextLen > 0) {
++				if (ckHashSignAdditionalContext->pContext == NULL_PTR) {
++					ERROR_MSG("Invalid parameters");
++					return CKR_ARGUMENTS_BAD;
++				}
++				if (ckHashSignAdditionalContext->ulContextLen > 255) {
++					ERROR_MSG("Invalid parameters");
++					return CKR_ARGUMENTS_BAD;
++				}
++				slhdsaParam.additionalContext = ByteString(ckHashSignAdditionalContext->pContext, ckHashSignAdditionalContext->ulContextLen);
++			}
++			DEBUG_MSG("Sign HashSLHDSA additionalContextLen=%lu, hedgeType=%d", (unsigned long)slhdsaParam.additionalContext.size(), slhdsaParam.hedgeType);
++			mechanismParam = &slhdsaParam;
++			break;
++		}
+ #endif
+ 		default:
+ 			return CKR_MECHANISM_INVALID;
+@@ -5860,6 +5905,45 @@
+ 				mechanismParam = &slhdsaParam;
+ 			}
+ 			break;
++		case CKM_HASH_SLH_DSA:
++		{
++			// The pre-hashed variant of SLH-DSA (HashSLH-DSA, FIPS 205 section
++			// 10.2).  The caller supplies a digest along with the mechanism that
++			// produced it; the message encoding is built by the crypto backend.
++			mechanism = AsymMech::SLHDSA;
++			bAllowMultiPartOp = true;
++			isSLHDSA = true;
++			if (pMechanism->pParameter == NULL_PTR ||
++			    pMechanism->ulParameterLen != sizeof(CK_HASH_SIGN_ADDITIONAL_CONTEXT))
++			{
++				ERROR_MSG("Invalid parameters");
++				return CKR_ARGUMENTS_BAD;
++			}
++			CK_HASH_SIGN_ADDITIONAL_CONTEXT* ckHashSignAdditionalContext = (CK_HASH_SIGN_ADDITIONAL_CONTEXT*) pMechanism->pParameter;
++			CK_RV rv = SLHDSAUtil::setHedge(ckHashSignAdditionalContext->hedgeVariant, &slhdsaParam.hedgeType);
++			if (rv != CKR_OK) {
++				ERROR_MSG("Invalid parameters");
++				return CKR_ARGUMENTS_BAD;
++			}
++			rv = SLHDSAUtil::setHashOid(ckHashSignAdditionalContext->hash, &slhdsaParam.hashOid, &slhdsaParam.hashDigestLen);
++			if (rv != CKR_OK) {
++				return rv;
++			}
++			if (ckHashSignAdditionalContext->ulContextLen > 0) {
++				if (ckHashSignAdditionalContext->pContext == NULL_PTR) {
++					ERROR_MSG("Invalid parameters");
++					return CKR_ARGUMENTS_BAD;
++				}
++				if (ckHashSignAdditionalContext->ulContextLen > 255) {
++					ERROR_MSG("Invalid parameters");
++					return CKR_ARGUMENTS_BAD;
++				}
++				slhdsaParam.additionalContext = ByteString(ckHashSignAdditionalContext->pContext, ckHashSignAdditionalContext->ulContextLen);
++			}
++			DEBUG_MSG("Verify HashSLHDSA additionalContextLen=%lu, hedgeType=%d", (unsigned long)slhdsaParam.additionalContext.size(), slhdsaParam.hedgeType);
++			mechanismParam = &slhdsaParam;
++			break;
++		}
+ #endif
+ 		default:
+ 			return CKR_MECHANISM_INVALID;

@@ -229,13 +229,6 @@ _SPX_BACKENDS = {
     },
 }
 
-# The pre-hashed domains select CKM_HASH_SLH_DSA, which the vendored SoftHSM
-# does not implement yet, so both the sign and the verify side of those
-# combinations fail with CKR_MECHANISM_INVALID.  The `_BROKEN_ON_SLH_DSA` tags
-# below keep those four targets defined and runnable against a patched SoftHSM
-# while excluding them from CI, rather than dropping the coverage entirely.
-_BROKEN_ON_SLH_DSA = {"PreHashedSha256": ["broken"], "Pure": []}
-
 # Sign a digest with opentitantool and then verify the signature with hsmtool.
 [
     sh_test(
@@ -282,7 +275,6 @@ _BROKEN_ON_SLH_DSA = {"PreHashedSha256": ["broken"], "Pure": []}
                 verify_args = backend["verify_args"],
             ),
         },
-        tags = _BROKEN_ON_SLH_DSA[param["domain"]] if backend_name == "slh_dsa" else [],
         deps = [":test_lib"],
     )
     for name, param in _SPX_TESTS.items()
@@ -335,7 +327,6 @@ _BROKEN_ON_SLH_DSA = {"PreHashedSha256": ["broken"], "Pure": []}
                 label = backend["label"],
             ),
         },
-        tags = _BROKEN_ON_SLH_DSA[param["domain"]] if backend_name == "slh_dsa" else [],
         deps = [":test_lib"],
     )
     for name, param in _SPX_TESTS.items()
