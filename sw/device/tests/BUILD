@@ -26,6 +26,7 @@ load(
     "fpga_params",
     "opentitan_binary",
     "opentitan_test",
+    "otsim_params",
     "qemu_params",
     "silicon_params",
     "verilator_params",
@@ -4532,6 +4533,7 @@ opentitan_test(
         EARLGREY_CW340_TEST_ENVS,
         {
             "//hw/top_earlgrey:silicon_creator": None,
+            "//hw/top_earlgrey:sim_otsim": None,
         },
     ),
     fpga = fpga_params(tags = ["coverage"]),
@@ -7060,12 +7062,17 @@ opentitan_test(
         {
             "//hw/top_earlgrey:fpga_cw310_sival": None,
             "//hw/top_earlgrey:silicon_creator": None,
+            "//hw/top_earlgrey:sim_otsim": None,
             # See #23468, currently broken on SAM3X execution environments.
             "//hw/top_earlgrey:fpga_cw310_test_rom": "broken",
             "//hw/top_earlgrey:fpga_cw310_rom_with_fake_keys": "broken",
         },
     ),
     fpga = fpga_params(
+        test_cmd = "--firmware-elf={firmware:elf}",
+        test_harness = "//sw/host/tests/chip/uart:uart_tx_rx",
+    ),
+    otsim = otsim_params(
         test_cmd = "--firmware-elf={firmware:elf}",
         test_harness = "//sw/host/tests/chip/uart:uart_tx_rx",
     ),

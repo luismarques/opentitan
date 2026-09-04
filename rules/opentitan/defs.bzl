@@ -65,6 +65,11 @@ load(
     _qemu_params = "qemu_params",
     _sim_qemu = "sim_qemu",
 )
+load(
+    "@lowrisc_opentitan//rules/opentitan:otsim.bzl",
+    _otsim_params = "otsim_params",
+    _sim_otsim = "sim_otsim",
+)
 
 # The following definition is used to clear the key set in the signing
 # configuration for execution environments (exec_env) and opentitan_test
@@ -97,6 +102,9 @@ dv_params = _dv_params
 
 sim_qemu = _sim_qemu
 qemu_params = _qemu_params
+
+sim_otsim = _sim_otsim
+otsim_params = _otsim_params
 
 ecdsa_key_for_lc_state = _ecdsa_key_for_lc_state
 ecdsa_key_by_name = _ecdsa_key_by_name
@@ -160,6 +168,8 @@ def _parameter_name(env, pname):
             pname = "dv"
         elif "silicon" in suffix:
             pname = "silicon"
+        elif "otsim" in suffix:
+            pname = "otsim"
         elif "qemu" in suffix:
             pname = "qemu"
         else:
@@ -215,6 +225,7 @@ def opentitan_test(
         silicon = _silicon_params(),
         verilator = _verilator_params(),
         qemu = _qemu_params(),
+        otsim = _otsim_params(),
         slot_spec = {},
         run_in_ci = None,
         **kwargs):
@@ -245,6 +256,7 @@ def opentitan_test(
       silicon: Execution overrides for a silicon-based test.
       verilator: Execution overrides for a verilator-based test.
       qemu: Execution overrides for a QEUM-based test.
+      otsim: Execution overrides for an otsim-based test.
       run_in_ci: Override the automatic selection of execution environments to run in CI and run exactly those environments.
       kwargs: Additional execution overrides identified by the `exec_env` dict.
     """
@@ -255,6 +267,7 @@ def opentitan_test(
         "silicon": silicon,
         "verilator": verilator,
         "qemu": qemu,
+        "otsim": otsim,
     }
     test_parameters.update(kwargs)
     kwargs_unused = kwargs.keys()

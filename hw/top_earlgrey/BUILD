@@ -22,6 +22,7 @@ load(
     "fpga_cw340",
     "silicon",
     "sim_dv",
+    "sim_otsim",
     "sim_qemu",
     "sim_verilator",
 )
@@ -120,6 +121,36 @@ fpga_cw310(
     },
     rom = "//sw/device/lib/testing/test_rom:test_rom",
     test_cmd = CLEAR_TEST_CMD,
+)
+
+# The `otsim` emulator boots the same images the CW310 does, so it reuses the
+# CW310 test ROM environment for everything except how a test is run: there is
+# no bitstream to load and no image to bootstrap, because otsim reads the ROM
+# and the flash straight out of their ELF files.  The test script starts the
+# emulator and the harness talks to it over the proxy protocol.
+#
+# Only the test ROM works so far; the real ROM with fake keys does not yet boot
+# under otsim.
+sim_otsim(
+    name = "sim_otsim",
+    testonly = True,
+    args = [
+        "--rcfile=",
+        "--logging=info",
+        "--interface={interface}",
+        "--proxy=localhost",
+        "--drop-reset",
+    ],
+    base = ":fpga_cw310_test_rom",
+    exec_env = "sim_otsim",
+    param = {
+        "interface": "proxy",
+    },
+    test_cmd = """
+        --exec="transport init"
+        --exec="console --non-interactive --exit-success='{exit_success}' --exit-failure='{exit_failure}'"
+        no-op
+    """,
 )
 
 fpga_cw310(

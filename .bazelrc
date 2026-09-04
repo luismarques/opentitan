@@ -78,6 +78,13 @@ test:local_test_jobs_per_cpus --local_test_jobs=HOST_CPUS*0.22
 # We have verilator tests that take more than an hour to complete
 test --test_timeout=60,300,1500,7200
 
+# The `sim_otsim` execution environment launches the `otsim` emulator, which is
+# built outside Bazel.  Its default path is baked into rules/opentitan/otsim.bzl;
+# this lets a run override it without re-analysing.  Nothing else reads it.
+#
+#     OTSIM=/path/to/otsim bazel test //sw/device/tests:uart_smoketest_sim_otsim
+test --test_env=OTSIM
+
 # Configuration to run clang-tidy alongside build actions. This is a strict
 # analysis, which will fail the build when any of its checks fail. Enable with
 # `--config=clang_tidy_check`.
