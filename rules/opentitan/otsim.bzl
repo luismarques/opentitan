@@ -22,6 +22,12 @@ the build.  In order of preference:
 Bazel runs tests with `HOME` unset, so the default cannot be written relative
 to the home directory and is spelled out in full instead.  That, and the fact
 that otsim is not vendored anywhere, is why none of this is fit to upstream.
+
+Emulator options come either from the test, with `otsim_params(otsim_args =
+[...])`, or from a run, with `--test_arg=--otsim-arg=<option>`, which the test
+script picks back out of its own argument list.  The latter is how something
+like `--verilated-uart` gets turned on for one run and not the next; because it
+is a test argument, Bazel keys cached results on it.
 """
 
 load(
@@ -78,7 +84,9 @@ def otsim_params(
       max_steps: Instruction budget for the emulator.  Unbounded by default,
                  which leaves the harness's own timeout in charge of ending a
                  run that hangs.
-      otsim_args: Additional arguments to pass to the emulator.
+      otsim_args: Additional arguments to pass to the emulator.  A run can add
+                  more with `--test_arg=--otsim-arg=<option>`, which come after
+                  these.
       kwargs: Additional key-value pairs to override in the test `param` dict.
     Returns:
       struct of test parameters.

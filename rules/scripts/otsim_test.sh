@@ -21,7 +21,30 @@ test_harness="__test_harness__"
 test_cmd=( __test_cmd__ )
 args=( __args__ )
 
-SCRIPT_ARGS=("$@")
+# Split our own arguments: anything of the form `--otsim-arg=X` is meant for the
+# emulator rather than for the test harness, so that a single run can turn an
+# emulator option on without an edit.
+#
+#     bazel test //sw/device/tests:uart_smoketest_sim_otsim \
+#         --test_arg=--otsim-arg=--verilated-uart
+#
+# `--otsim-args=X Y Z` does the same for several at once, and both come after
+# whatever the test itself asked for, so a run wins over a BUILD file.
+harness_args=()
+for arg in "$@"; do
+    case "${arg}" in
+        --otsim-arg=*)
+            otsim_args+=( "${arg#--otsim-arg=}" )
+            ;;
+        --otsim-args=*)
+            read -r -a arg_words <<<"${arg#--otsim-args=}"
+            otsim_args+=( "${arg_words[@]}" )
+            ;;
+        *)
+            harness_args+=( "${arg}" )
+            ;;
+    esac
+done
 
 # Locate the emulator.  It is built outside Bazel, so the default path is baked
 # in at analysis time; `$OTSIM` wins over it so that a single run can point at a
@@ -118,4 +141,4 @@ if [[ -z "${connected}" ]]; then
 fi
 
 set -x
-"${test_harness}" "${args[@]}" --port="${proxy_port}" "${SCRIPT_ARGS[@]}" "${test_cmd[@]}"
+"${test_harness}" "${args[@]}" --port="${proxy_port}" "${harness_args[@]}" "${test_cmd[@]}"
