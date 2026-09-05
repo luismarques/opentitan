@@ -31,6 +31,12 @@ opentitantool="__opentitantool__"
 #
 # `--otsim-args=X Y Z` does the same for several at once, and both come after
 # whatever the test itself asked for, so a run wins over a BUILD file.
+#
+# otsim's parser is a switch over whole arguments, so an option which takes a
+# value needs its two words kept apart -- `--otsim-args=--otp other.vmem`, or an
+# `--otsim-arg=` for each.  Joining them with an `=` reaches otsim as one word,
+# matches no case, and gets usage and a non-zero exit -- which arrives here as
+# "the emulator exited before it served the proxy port".
 harness_args=()
 for arg in "$@"; do
     case "${arg}" in
@@ -128,26 +134,20 @@ cleanup() {
 # killing us, so this runs even on timeout.
 trap cleanup EXIT
 
-# otsim reads the OTP image from `img_rma.24.vmem` in its working directory,
-# with no way to say otherwise, so give it a directory of its own with the
-# environment's OTP image under that name.  Everything else is named by an
-# absolute path, because that directory is not the runfiles tree.
-runfiles="${PWD}"
-work_dir="${TEST_TMPDIR:-${runfiles}}/otsim"
-rm -rf "${work_dir}"
-mkdir -p "${work_dir}"
+# The images the environment supplies go first, so that an option from a run
+# overrides one of them: otsim takes the last of a repeated option, and the ROM
+# is positional, so it stays last.
+otsim_cmd=( "${otsim}" --headless --proxy "${proxy_port}" )
 if [[ -n "${otp_vmem}" ]]; then
-    ln -s "${runfiles}/${otp_vmem}" "${work_dir}/img_rma.24.vmem"
+    otsim_cmd+=( --otp "${otp_vmem}" )
 fi
-
-otsim_cmd=( "${otsim}" --headless --proxy "${proxy_port}" "${otsim_args[@]}" )
 if [[ -n "${flash_elf}" ]]; then
-    otsim_cmd+=( --flash "${runfiles}/${flash_elf}" )
+    otsim_cmd+=( --flash "${flash_elf}" )
 fi
-otsim_cmd+=( "${runfiles}/${rom_elf}" )
+otsim_cmd+=( "${otsim_args[@]}" "${rom_elf}" )
 
-echo "Starting emulator in ${work_dir}: ${otsim_cmd[*]}"
-( cd "${work_dir}" && exec "${otsim_cmd[@]}" ) > >(sed -u 's/^/[otsim] /') 2>&1 &
+echo "Starting emulator: ${otsim_cmd[*]}"
+"${otsim_cmd[@]}" > >(sed -u 's/^/[otsim] /') 2>&1 &
 otsim_pid=$!
 
 # Wait for the proxy to accept connections.  otsim opens the listener before it
