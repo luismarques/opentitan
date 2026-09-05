@@ -20,6 +20,7 @@ otsim_default="__otsim__"
 test_harness="__test_harness__"
 test_cmd=( __test_cmd__ )
 args=( __args__ )
+opentitantool="__opentitantool__"
 
 # Split our own arguments: anything of the form `--otsim-arg=X` is meant for the
 # emulator rather than for the test harness, so that a single run can turn an
@@ -78,18 +79,48 @@ fi
 
 otsim_pid=""
 
+# Wait up to $1 tenths of a second for the emulator to go away.  Returns 0 if
+# it did.
+wait_for_otsim() {
+    for _ in $(seq "$1"); do
+        kill -0 "${otsim_pid}" 2>/dev/null || return 0
+        sleep 0.1
+    done
+    ! kill -0 "${otsim_pid}" 2>/dev/null
+}
+
 cleanup() {
     ret=$?
     set +ex
     if [[ -n "${otsim_pid}" ]] && kill -0 "${otsim_pid}" 2>/dev/null; then
         # otsim keeps serving after the image has parked, because a host may
         # yet reset it and run something else, so ending the run is up to us.
-        kill "${otsim_pid}" 2>/dev/null
-        for _ in $(seq 20); do
-            kill -0 "${otsim_pid}" 2>/dev/null || break
-            sleep 0.1
-        done
-        kill -KILL "${otsim_pid}" 2>/dev/null
+        #
+        # Ask over the proxy rather than signalling, because `Emu Stop` lets it
+        # leave the way it would have on its own: it prints the transcript of
+        # what the device wrote and exits on whether the image reported a pass.
+        # A signal truncates both, so a failing test loses the `[otsim]` lines
+        # that say where the machine actually stopped -- which is the part worth
+        # reading.
+        "${opentitantool}" --rcfile= --logging=error --interface=proxy \
+            --proxy=localhost --port="${proxy_port}" emulator stop \
+            >/dev/null 2>&1
+        wait_for_otsim 50
+        # And fall back to a signal, because the reasons this can fail are the
+        # reasons cleanup exists: a bazel timeout can land while the socket is
+        # mid-request, an emulator wedged before it served the port never
+        # answers, and a build of otsim older than the fix that made `Emu Stop`
+        # reachable at all replies "unknown emulator request: command".
+        if kill -0 "${otsim_pid}" 2>/dev/null; then
+            kill "${otsim_pid}" 2>/dev/null
+            wait_for_otsim 20
+            kill -KILL "${otsim_pid}" 2>/dev/null
+        fi
+    fi
+    # Let the emulator's last output through the `sed` that prefixes it before
+    # this script's own exit closes the pipe under it.
+    if [[ -n "${otsim_pid}" ]]; then
+        wait "${otsim_pid}" 2>/dev/null
     fi
     exit "${ret}"
 }

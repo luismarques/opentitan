@@ -219,6 +219,9 @@ def _test_dispatch(ctx, exec_env, firmware):
             for (key, val) in {
                 "args": args,
                 "flash_elf": flash_elf,
+                # For the shutdown in the test script's cleanup, which asks the
+                # emulator to stop over the proxy rather than signalling it.
+                "opentitantool": exec_env._opentitantool.executable.short_path,
                 "otp": param.get("otp", ""),
                 "otsim": ctx.var.get("otsim", _DEFAULT_OTSIM),
                 "otsim_args": otsim_args,
