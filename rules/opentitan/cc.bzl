@@ -521,7 +521,7 @@ def _opentitan_binary(ctx):
     for exec_env_target in ctx.attr.exec_env:
         exec_env = exec_env_target[ExecEnvInfo]
         name = _binary_name(ctx, exec_env)
-        deps = ctx.attr.deps + exec_env.libs
+        deps = ctx.attr.deps + (exec_env.libs if ctx.attr.use_exec_env_libs else [])
         for dep in deps:
             runfiles = runfiles.merge(dep[DefaultInfo].default_runfiles)
 
@@ -693,6 +693,12 @@ common_binary_attrs = {
         default = [],
         doc = "List of features that will apply to this binary, and transitively to all `deps`.",
     ),
+    "use_exec_env_libs": attr.bool(
+        default = True,
+        doc = "Link the execution environment's support libraries into this binary. " +
+              "Set to False only for binaries that cannot use them at all, such as " +
+              "CHERIoT images: every OpenTitan library containing code is still RV32-only.",
+    ),
     "slot_spec": attr.string_dict(
         default = {},
         doc = "Firmware slot spec to use in this environment",
@@ -764,7 +770,7 @@ def _opentitan_test(ctx):
 
     if ctx.attr.srcs or ctx.attr.deps:
         name = _binary_name(ctx, exec_env)
-        deps = ctx.attr.deps + exec_env.libs
+        deps = ctx.attr.deps + (exec_env.libs if ctx.attr.use_exec_env_libs else [])
         kind = ctx.attr.kind
         provides, signed = _build_binary(ctx, exec_env, name, deps, kind)
         p = exec_env.provider(**provides)

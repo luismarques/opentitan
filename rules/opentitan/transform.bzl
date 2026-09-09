@@ -95,6 +95,10 @@ def obj_transform(ctx, strip_llvm_prf_cnts = False, **kwargs):
 def obj_disassemble(ctx, **kwargs):
     """Disassemble an input file.
 
+    The disassembler and its flags both come from the toolchain, because the
+    RV32 and CHERIoT toolchains disassemble with different programs which do not
+    accept the same arguments.
+
     Args:
       ctx: The context object for this rule.
       kwargs: Overrides of values normally retrived from the context object.
@@ -115,6 +119,11 @@ def obj_disassemble(ctx, **kwargs):
         feature_configuration = feature_config,
         action_name = OT_ACTION_OBJDUMP,
     )
+    flags = cc_common.get_memory_inefficient_command_line(
+        feature_configuration = feature_config,
+        action_name = OT_ACTION_OBJDUMP,
+        variables = cc_common.empty_variables(),
+    )
 
     output = kwargs.get("output")
     if not output:
@@ -132,7 +141,12 @@ def obj_disassemble(ctx, **kwargs):
             src.path,
             output.path,
         ],
-        command = "$1 -wx --disassemble --line-numbers --disassemble-zeroes --source --visualize-jumps $2 | expand > $3",
+        # `pipefail` matters here: without it the exit status is `expand`'s, so
+        # a disassembler that rejects its arguments would leave an empty `.dis`
+        # behind and the build would still succeed.
+        command = "set -o pipefail; $1 {} $2 | expand > $3".format(
+            " ".join(flags),
+        ),
     )
     return output
 

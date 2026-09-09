@@ -39,6 +39,9 @@ exports_files(glob(["**"]))
     for tool in [
         "profdata",
         "cov",
+        # Unlike the binutils objdump, this one can disassemble the CHERI
+        # instructions; see `//toolchain:cheriot_tool_map`.
+        "objdump",
     ]
 ]
 
@@ -52,5 +55,5 @@ directory(
 subdirectory(
     name = "lib-clang-include",
     parent = ":root",
-    path = "lib/clang/21/include",
+    path = "lib/clang/22/include",
 )

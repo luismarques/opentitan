@@ -5,12 +5,16 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 def _lowrisc_repos():
-    VERSION = "20260224-1"
+    # A CHERIoT-capable LLVM 22 build of the toolchain, needed by
+    # `//toolchain:cheriot_toolchain`. This is an untagged artifact from the CI
+    # long-term cache rather than a `lowrisc-toolchains` release, so it carries
+    # no version in its name; switch back to a release URL once one ships with
+    # CHERIoT support.
     http_archive(
         name = "lowrisc_rv32imcb_toolchain",
-        url = "https://github.com/lowRISC/lowrisc-toolchains/releases/download/{v}/lowrisc-toolchain-rv32imcb-x86_64-{v}.tar.xz".format(v = VERSION),
-        sha256 = "528facbc6cb6f02667ce7613ab21383fca42b18cca6f4914b7160636080d3569",
-        strip_prefix = "lowrisc-toolchain-rv32imcb-x86_64-{}".format(VERSION),
+        url = "https://storage.googleapis.com/lowrisc-ci-longterm-cache/lowrisc-toolchain-rv32imcb-x86_64-cheriot-lto2.tar.xz",
+        sha256 = "61eb26a20c1ead5024cdb7e69e79b4ca42e7bc0e0f0eff962fecd56ab6024cd4",
+        strip_prefix = "lowrisc-toolchain-rv32imcb-x86_64-",
         build_file = ":BUILD.lowrisc_rv32imcb_toolchain.bazel",
     )
 

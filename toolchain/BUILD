@@ -20,6 +20,39 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
+# Toolchain arguments that are independent of the target ISA, and so are shared
+# by the RV32 and the CHERIoT toolchains. The ISA/ABI selection arguments are
+# listed by each `cc_toolchain` individually.
+COMMON_TOOLCHAIN_ARGS = [
+    ":warnings",
+    ":reproducible",
+    ":symbol_garbage_collection",
+    ":constructor_destructor",
+    ":nostdinc",
+    ":discard_locals",
+]
+
+COMMON_ENABLED_FEATURES = [
+    "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
+    ":feat_warnings_as_errors",
+    ":feat_use_lld",
+    ":feat_minsize",
+]
+
+COMMON_KNOWN_FEATURES = [
+    "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
+    ":feat_warnings_as_errors",
+    ":feat_guards",
+    ":feat_coverage",
+    ":feat_use_lld",
+    ":feat_lto",
+    ":feat_minsize",
+    ":feat_dbg",
+    ":feat_fastbuild",
+    ":feat_opt",
+    ":feat_no_jump_tables",
+]
+
 # OpenTitanTool toolchain for usage in upstream signing rules
 opentitantool(
     name = "latest_opentitantool",
@@ -40,6 +73,41 @@ platform(
         "@platforms//os:none",
         ":device",
     ],
+)
+
+# Same CPU (and the same silicon), but the CHERIoT ISA rather than plain RV32.
+# CHERIoT has its own ISA extensions, ABI and code model, so it needs a
+# separate C/C++ toolchain; see `:cheriot_toolchain` below.
+platform(
+    name = "cheriot_platform",
+    constraint_values = [
+        "@platforms//cpu:riscv32",
+        "@platforms//os:none",
+        ":device",
+        ":isa_cheriot",
+    ],
+)
+
+# Selects between the RISC-V ISA variants we can target. `@platforms//cpu` has
+# no CHERIoT value, and CHERIoT is not just another `-march` string (it changes
+# the ABI and the meaning of a pointer), so we distinguish the two here.
+#
+# `:isa_rv32` is the default, which means platforms predating this setting
+# (including `:opentitan_platform`) keep resolving to the RV32 toolchain
+# without having to name it.
+constraint_setting(
+    name = "isa",
+    default_constraint_value = ":isa_rv32",
+)
+
+constraint_value(
+    name = "isa_rv32",
+    constraint_setting = ":isa",
+)
+
+constraint_value(
+    name = "isa_cheriot",
+    constraint_setting = ":isa",
 )
 
 constraint_setting(name = "target")
@@ -65,8 +133,21 @@ toolchain(
     target_compatible_with = [
         "@platforms//cpu:riscv32",
         "@platforms//os:none",
+        ":isa_rv32",
     ],
     toolchain = ":opentitan_toolchain",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
+toolchain(
+    name = "cc_toolchain_cheriot",
+    exec_compatible_with = ["@platforms//cpu:x86_64"],
+    target_compatible_with = [
+        "@platforms//cpu:riscv32",
+        "@platforms//os:none",
+        ":isa_cheriot",
+    ],
+    toolchain = ":cheriot_toolchain",
     toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
 )
 
@@ -78,53 +159,66 @@ cc_toolchain(
         ":arch_rv32imc",
         ":arch_rv32imcb",
         ":abi",
-        ":warnings",
-        ":reproducible",
-        ":symbol_garbage_collection",
-        ":constructor_destructor",
-        ":nostdinc",
-        ":discard_locals",
-    ],
-    enabled_features = [
-        "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
-        ":feat_rv32_bitmanip",
-        ":feat_warnings_as_errors",
-        ":feat_use_lld",
+        ":disassemble",
+    ] + COMMON_TOOLCHAIN_ARGS,
+    enabled_features = COMMON_ENABLED_FEATURES + [
         ":feat_lto",
-        ":feat_minsize",
-    ],
-    known_features = [
-        "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
-        ":feat_warnings_as_errors",
-        ":feat_guards",
-        ":feat_coverage",
-        ":feat_use_lld",
-        ":feat_lto",
-        ":feat_minsize",
-        ":feat_dbg",
-        ":feat_fastbuild",
-        ":feat_opt",
         ":feat_rv32_bitmanip",
-        ":feat_no_jump_tables",
     ],
+    known_features = COMMON_KNOWN_FEATURES + [":feat_rv32_bitmanip"],
     tool_map = ":tool_map",
 )
 
+# The CHERIoT toolchain. This runs the very same binaries as the RV32 toolchain
+# above and differs only in the ISA, ABI and code model flags it passes to them.
+#
+cc_toolchain(
+    name = "cheriot_toolchain",
+    args = [
+        ":system_includes",
+        ":arch_cheriot",
+        ":arch_cheriot_no_bitmanip",
+        ":abi_cheriot",
+        ":disassemble_cheriot",
+    ] + COMMON_TOOLCHAIN_ARGS,
+    enabled_features = COMMON_ENABLED_FEATURES + [
+        ":feat_lto",
+        ":feat_rv32_bitmanip",
+    ],
+    known_features = COMMON_KNOWN_FEATURES + [":feat_rv32_bitmanip"],
+    tool_map = ":cheriot_tool_map",
+)
+
 # Map from C/C++ compilation actions to tools.
+COMMON_TOOLS = {
+    "@rules_cc//cc/toolchains/actions:ar_actions": "@lowrisc_rv32imcb_toolchain//:ar",
+    "@rules_cc//cc/toolchains/actions:assembly_actions": "@lowrisc_rv32imcb_toolchain//:clang",
+    "@rules_cc//cc/toolchains/actions:c_compile": "@lowrisc_rv32imcb_toolchain//:clang",
+    "@rules_cc//cc/toolchains/actions:cpp_compile_actions": "@lowrisc_rv32imcb_toolchain//:clang++",
+    "@rules_cc//cc/toolchains/actions:link_actions": "@lowrisc_rv32imcb_toolchain//:clang",
+    "@rules_cc//cc/toolchains/actions:llvm_cov": "@lowrisc_rv32imcb_toolchain//:llvm_cov",
+    "@rules_cc//cc/toolchains/actions:objcopy_embed_data": "@lowrisc_rv32imcb_toolchain//:objcopy",
+    "@rules_cc//cc/toolchains/actions:strip": "@lowrisc_rv32imcb_toolchain//:strip",
+    ":action_llvm_profdata": "@lowrisc_rv32imcb_toolchain//:llvm_profdata",
+    ":action_nm": "@lowrisc_rv32imcb_toolchain//:nm",
+}
+
 cc_tool_map(
     name = "tool_map",
-    tools = {
-        "@rules_cc//cc/toolchains/actions:ar_actions": "@lowrisc_rv32imcb_toolchain//:ar",
-        "@rules_cc//cc/toolchains/actions:assembly_actions": "@lowrisc_rv32imcb_toolchain//:clang",
-        "@rules_cc//cc/toolchains/actions:c_compile": "@lowrisc_rv32imcb_toolchain//:clang",
-        "@rules_cc//cc/toolchains/actions:cpp_compile_actions": "@lowrisc_rv32imcb_toolchain//:clang++",
-        "@rules_cc//cc/toolchains/actions:link_actions": "@lowrisc_rv32imcb_toolchain//:clang",
-        "@rules_cc//cc/toolchains/actions:llvm_cov": "@lowrisc_rv32imcb_toolchain//:llvm_cov",
-        "@rules_cc//cc/toolchains/actions:objcopy_embed_data": "@lowrisc_rv32imcb_toolchain//:objcopy",
-        "@rules_cc//cc/toolchains/actions:strip": "@lowrisc_rv32imcb_toolchain//:strip",
-        ":action_llvm_profdata": "@lowrisc_rv32imcb_toolchain//:llvm_profdata",
+    tools = COMMON_TOOLS | {
         ":action_objdump": "@lowrisc_rv32imcb_toolchain//:objdump",
-        ":action_nm": "@lowrisc_rv32imcb_toolchain//:nm",
+    },
+)
+
+# Identical to `:tool_map`, except that disassembly goes through `llvm-objdump`.
+# The binutils objdump knows nothing about the CHERI extension and renders every
+# CHERI instruction as a bare `.insn`, which makes the disassembly of a CHERIoT
+# image useless. Note that the two disassemblers do not take the same flags; see
+# `obj_disassemble` in `rules/opentitan/transform.bzl`.
+cc_tool_map(
+    name = "cheriot_tool_map",
+    tools = COMMON_TOOLS | {
+        ":action_objdump": "@lowrisc_rv32imcb_toolchain//:llvm_objdump",
     },
 )
 
@@ -141,6 +235,40 @@ cc_action_type(
 cc_action_type(
     name = "action_objdump",
     action_name = OT_ACTION_OBJDUMP,
+)
+
+# Flags for the disassembly action, consumed by `obj_disassemble` in
+# `rules/opentitan/transform.bzl`. These live on the toolchain because the two
+# toolchains disassemble with different programs: the binutils objdump cannot
+# decode CHERI instructions, so the CHERIoT toolchain uses `llvm-objdump`, which
+# does not accept the same arguments.
+cc_args(
+    name = "disassemble",
+    actions = [":action_objdump"],
+    args = [
+        "-wx",
+        "--disassemble",
+        "--line-numbers",
+        "--disassemble-zeroes",
+        "--source",
+        "--visualize-jumps",
+    ],
+)
+
+# `llvm-objdump` accepts all of the above except `--visualize-jumps`, and has to
+# be told which CPU it is looking at before it will decode the compressed CHERI
+# encodings.
+cc_args(
+    name = "disassemble_cheriot",
+    actions = [":action_objdump"],
+    args = [
+        "-wx",
+        "--mcpu=cheriot-ibex",
+        "--disassemble",
+        "--line-numbers",
+        "--disassemble-zeroes",
+        "--source",
+    ],
 )
 
 # minsize feature to switch between Os and Oz.
@@ -176,7 +304,6 @@ cc_feature(
         ":minsize_inline_cc",
         ":minsize_inline_ld",
         ":default_debug_info",
-        ":lto",
     ],
     overrides = "@rules_cc//cc/toolchains/features:opt",
 )
@@ -332,6 +459,68 @@ cc_args(
     ],
 )
 
+# CHERIoT ISA selection. The arch strings deliberately mirror the RV32 ones
+# above, with only the two deltas CHERIoT requires: `i` becomes `e` (CHERIoT is
+# RV32E-based, so only x0-x15 exist and assembly for this toolchain may not use
+# a6/a7 or s2-s11), and `xcheriot` is added. That yields exactly the RV32
+# feature set plus `xcheri`/`xcheriot`/`xcheripurecap`, so a source file does
+# not acquire a different instruction set just by being built for CHERIoT.
+#
+# Note there is deliberately no `-mcpu`. `-mcpu=cheriot-ibex` looks like the
+# natural choice, but it pulls in two things the RV32 build does not have: the
+# crypto bitmanip extensions `zbkb`/`zbkc`, and `unaligned-scalar-mem`. It also
+# breaks the arch string under LTO, because the LTO backend re-derives features
+# from `-mcpu` and ignores `-march`, so the linked image silently regains
+# `zbkb`/`zbkc`. Naming the extensions in `-march` alone avoids all three.
+#
+# There is no need to ask for compressed CHERI encodings or for relaxation:
+# `-mxcheri-rvc` and `-mrelax` are both no-ops here.
+cc_args(
+    name = "arch_cheriot",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "--target=riscv32-unknown-unknown",
+        "-march=rv32emc_zba_zbb_zbc_zbs_xcheriot",
+    ],
+    requires_any_of = [":constraint_bitmanip"],
+)
+
+# The counterpart of `:arch_rv32imc`: same thing without the bitmanip
+# extensions.
+cc_args(
+    name = "arch_cheriot_no_bitmanip",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "--target=riscv32-unknown-unknown",
+        "-march=rv32emc_xcheriot",
+    ],
+    requires_any_of = [":constraint_no_bitmanip"],
+)
+
+# `-mabi=cheriot-baremetal` is the bare-metal CHERIoT ABI. The plain
+# `-mabi=cheriot` is the CHERIoT RTOS compartment ABI, which expects a loader
+# to resolve cross-compartment calls through import tables; OpenTitan firmware
+# has no such loader. The two are distinguishable in source via
+# `__CHERIOT_BAREMETAL__`, which only the former defines.
+cc_args(
+    name = "abi_cheriot",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "-mabi=cheriot-baremetal",
+        "-mcmodel=medany",
+        "-mlittle-endian",
+    ],
+)
+
 # NOTE: please keep this list of warnings in sync with the warnings in
 # `compile_flags.txt` so that `clangd` can see them.
 cc_args(
@@ -456,6 +645,11 @@ cc_args(
     args = ["-fuse-ld=lld"],
 )
 
+# Note that `:feat_opt` deliberately does not also list `:lto`. LTO is on for
+# every RV32 build because this feature is in `enabled_features`, so listing it
+# there too changed nothing except to make `--features=-lto` silently ineffective
+# in `-c opt` builds - and to force LTO on toolchains that do not enable it (see
+# `:cheriot_toolchain`).
 cc_feature(
     name = "feat_lto",
     args = [":lto"],

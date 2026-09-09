@@ -19,6 +19,7 @@ load(
 )
 load(
     "//rules/opentitan:defs.bzl",
+    "CHERIOT_PLATFORM",
     "DARJEELING_TEST_ENVS",
     "EARLGREY_CW340_TEST_ENVS",
     "EARLGREY_SILICON_OWNER_ROM_EXT_ENVS",
@@ -36,6 +37,7 @@ load(
 load("//rules/opentitan:keyutils.bzl", "ECDSA_ONLY_KEY_STRUCTS")
 load("//hw/top:defs.bzl", "opentitan_if_ip", "opentitan_select_top")
 load("//rules/opentitan:util.bzl", "flatten")
+load("//rules:linker.bzl", "ld_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -755,6 +757,75 @@ opentitan_test(
         "//sw/device/lib/testing:rstmgr_testutils",
         "//sw/device/lib/testing/test_framework:ottf_main",
     ],
+)
+
+################################################################################
+# ROM -> ROM_EXT -> CHERIoT boot chain on the CW340.
+#
+# `cheriot_bl0` is a first Silicon Owner stage compiled for CHERIoT rather than
+# RV32: it goes through the ordinary `opentitan_binary` flow (manifest, ECDSA
+# signing, slot geometry) with only the `platform` attribute redirected at the
+# CHERIoT toolchain. The test then assembles it behind the execution
+# environment's ROM_EXT and runs the result on the FPGA.
+#
+# IMPORTANT: this test needs a bitstream built from this tree:
+#
+#   bazel test --define bitstream=vivado //sw/device/tests:cheriot_bl0_boot_test
+#
+# The CHERIoT subsystem and the `CHERIOT_ENA`/`CHERIOT_LOCK` registers only
+# exist in the RTL as of commit 494c7978bc, which is newer than any bitstream in
+# the GCP cache. Against a cached bitstream those two register offsets land on
+# unrelated (read-only) registers, so the mode switch quietly does nothing, the
+# core stays in RV32, and the first CHERIoT instruction traps as illegal. The
+# symptom is that the ROM_EXT prints `entry:` and then the test times out with
+# no further output.
+################################################################################
+ld_library(
+    name = "cheriot_bl0_linker_script",
+    script = "cheriot_bl0.ld",
+    target_compatible_with = opentitan_require_top("earlgrey"),
+    deps = ["//hw/top:top_ld"],
+)
+
+opentitan_binary(
+    name = "cheriot_bl0",
+    testonly = True,
+    srcs = ["cheriot_bl0.S"],
+    exec_env = ["//hw/top_earlgrey:fpga_cw340_rom_ext"],
+    linker_script = ":cheriot_bl0_linker_script",
+    manifest = "//sw/device/silicon_owner:manifest",
+    platform = CHERIOT_PLATFORM,
+    target_compatible_with = opentitan_require_top("earlgrey"),
+    # The environment's support libraries (arch, dt, boot_stage_owner) are
+    # RV32-only, so they cannot be linked into a CHERIoT image.
+    use_exec_env_libs = False,
+    # Only address/register definitions; every OpenTitan library that contains
+    # code this image would call is still RV32-only.
+    deps = [
+        "//hw/top:rv_core_ibex_c_regs",
+        "//hw/top:top_lib",
+        "//hw/top:uart_c_regs",
+    ],
+)
+
+opentitan_test(
+    name = "cheriot_bl0_boot_test",
+    exec_env = {
+        "//hw/top_earlgrey:fpga_cw340_rom_ext": None,
+    },
+    fpga = fpga_params(
+        binaries = {
+            ":cheriot_bl0": "firmware",
+        },
+        # `[RC]TRAP` is the diagnostic trap handler in `cheriot_bl0.S`: `R`
+        # means it was entered in RV32 mode, so the mode switch never took
+        # effect, and `C` means the switch worked but something after it
+        # faulted. Matching it here turns what would otherwise be a timeout
+        # into an immediate failure with the marker and mcause on the console.
+        exit_failure = "[RC]TRAP ",
+        exit_success = "CHERIoT PASS!\r\n",
+        tags = ["manual"],
+    ),
 )
 
 opentitan_test(
