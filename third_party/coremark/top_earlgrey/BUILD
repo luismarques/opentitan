@@ -44,6 +44,9 @@ opentitan_test(
     exec_env = dicts.add(
         EARLGREY_TEST_ENVS,
         EARLGREY_SILICON_OWNER_ROM_EXT_ENVS,
+        {
+            "//hw/top_earlgrey:fpga_cw310_test_rom": None,
+        }
     ),
     verilator = verilator_params(
         timeout = "eternal",
