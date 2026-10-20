@@ -7,6 +7,7 @@
 #include "hw/top/rv_core_ibex_regs.h" // Generated.
 #include "hw/top/sram_ctrl_regs.h" // Generated.
 #include "hw/top/top_memory.h" // Generated.
+#include "hw/top/uart_regs.h" // Generated.
 
 #define DV_STATUS_IN_TEST 0x4354
 #define DV_STATUS_PASSED  0x900d
@@ -51,11 +52,13 @@ cheriot_header:
   .option pop
 cheriot_start:
   // In CHERIoT mode now.
+#ifdef DV_TEST_STATUS
   cspecialr a0, mtdc
   li        a1, TOP_RV_CORE_IBEX_CFG_BASE_ADDR
   csetaddr  ca1, ca0, a1
   li        a2, DV_STATUS_IN_TEST
   sw        a2, RV_CORE_IBEX_DV_SIM_WINDOW_REG_OFFSET(a1)
+#endif
 
 init_prng:
   // Xorshift32 PRNG requires non-zero seed value.
@@ -299,19 +302,48 @@ test_iteration_done:
   j test_loop
 
 success:
-  cspecialr a0, mtdc
-  li        a1, TOP_RV_CORE_IBEX_CFG_BASE_ADDR
-  csetaddr  ca0, ca0, a1
-  li        a1, DV_STATUS_PASSED
-  sw        a1, RV_CORE_IBEX_DV_SIM_WINDOW_REG_OFFSET(a0)
-  j park
+  cllc ca2, kPassMsg
+  li   a4, DV_STATUS_PASSED
+  j    report
 failure:
+  cllc ca2, kFailMsg
+  li   a4, DV_STATUS_FAILED
+
+report:
+  // Emit the result on UART0.
+  //
+  // ca2: null-terminated message.
+  cspecialr     ca0, mtdc
+  li            a1, TOP_UART0_BASE_ADDR
+  csetaddr      ca0, ca0, a1
+  csetboundsimm ca0, ca0, 0x40
+report_next:
+  lbu           a3, 0(ca2)
+  beqz          a3, report_done
+  cincoffsetimm ca2, ca2, 1
+report_wait:
+  // Spin while the transmit FIFO is full, then push the byte.
+  lw            a1, UART_STATUS_REG_OFFSET(a0)
+  andi          a1, a1, (1 << UART_STATUS_TXFULL_BIT)
+  bnez          a1, report_wait
+  sw            a3, UART_WDATA_REG_OFFSET(a0)
+  j             report_next
+report_done:
+  // Report the result to DV.
+  //
+  // a4: DV status value.
+#ifdef DV_TEST_STATUS
   cspecialr a0, mtdc
   li        a1, TOP_RV_CORE_IBEX_CFG_BASE_ADDR
   csetaddr  ca0, ca0, a1
-  li        a1, DV_STATUS_FAILED
-  sw        a1, RV_CORE_IBEX_DV_SIM_WINDOW_REG_OFFSET(a0)
-  j park
+  sw        a4, RV_CORE_IBEX_DV_SIM_WINDOW_REG_OFFSET(a0)
+#endif
 park:
   wfi
   j park
+
+  .section .rodata
+kPassMsg:
+  .asciz "PASS!\r\n"
+kFailMsg:
+  .asciz "FAIL!\r\n"
